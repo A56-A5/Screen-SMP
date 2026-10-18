@@ -360,6 +360,16 @@ select.mc-input {
   pointer-events: none;
   z-index: 10;
 }
+
+/* Theater mode (F): movie only — every piece of world chrome hides while
+   the video element covers the viewport. Settings/toasts stay above it. */
+.app-root.theater .mc-hud,
+.app-root.theater .mc-crosshair,
+.app-root.theater .mc-chat,
+.app-root.theater .mc-chat-hidden-btn,
+.app-root.theater .mc-tab-list {
+  display: none;
+}
 .mc-crosshair-h,
 .mc-crosshair-v {
   position: absolute;

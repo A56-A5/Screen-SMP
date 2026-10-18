@@ -186,10 +186,14 @@ app.get("/api/youtube/stream", async (req, res) => {
         .trimStart()
         .startsWith("#EXTM3U");
 
-      // HEAD (the client's type-sniff): answer from the probe, no full fetch.
+      // HEAD (the client's type-sniff): answer from the byte probe, no full
+      // fetch. googlevideo content-types LIE for HLS playlists — trusting
+      // them made the client attach <video> to an m3u8 (Chrome has no native
+      // HLS) so "some" links showed a title and never played.
       if (req.method === "HEAD") {
         const ct = sniff.headers.get("content-type");
-        if (ct) res.setHeader("content-type", ct);
+        if (isM3u8) res.setHeader("content-type", "application/vnd.apple.mpegurl");
+        else res.setHeader("content-type", ct ?? "video/mp4");
         const total = sniff.headers.get("content-range")?.split("/")[1];
         if (total && total !== "*") res.setHeader("content-length", total);
         return res.end();

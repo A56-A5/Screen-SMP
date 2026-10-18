@@ -44,6 +44,8 @@ export function RoomView({
   const [chatHidden, setChatHidden] = useState(false);
   const [copied, setCopied] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  // F: movie-only view — video fills the window, all chrome hides.
+  const [theater, setTheater] = useState(false);
   const [playback, setPlayback] = useState<PlaybackState>(initialRoom.playback);
   const [catalog, setCatalog] = useState<SampleVideo[]>([]);
   const [showTabList, setShowTabList] = useState(false);
@@ -182,6 +184,7 @@ export function RoomView({
       const hls = new Hls({ enableWorker: true });
       hls.loadSource(src);
       hls.attachMedia(v);
+      let mediaRetries = 0;
       hls.on(Hls.Events.ERROR, (_evt, data) => {
         if (!data.fatal) return;
         // Expired signed URLs / transient network: re-attach (server drops
@@ -193,6 +196,15 @@ export function RoomView({
             stopMedia();
             attachHls(src, reload + 1);
           }, 2000);
+          return;
+        }
+        // Decoder hiccups on odd streams: hls.js can recover in place.
+        if (data.type === Hls.ErrorTypes.MEDIA_ERROR && mediaRetries < 2) {
+          mediaRetries++;
+          console.warn("[hls] media error, recovering:", data.details);
+          setTimeout(() => {
+            if (!cancelled) hls.recoverMediaError();
+          }, 1000);
           return;
         }
         console.warn("[hls] fatal:", data.details);
@@ -234,8 +246,33 @@ export function RoomView({
 
     setup();
     g.attachVideo(v);
+
+    // Some links resolve but the media request still fails (expired
+    // signature, slow yt-dlp, odd stream). Re-run setup a few times — every
+    // request re-checks the server-side cache and can re-resolve.
+    let retries = 0;
+    const onMediaError = () => {
+      const el = videoRef.current;
+      if (cancelled || !el || !el.error || !el.currentSrc) return;
+      if (retries >= 3) {
+        if (playback.videoUrl) {
+          setToast("Video failed to load — try selecting it again.");
+          setTimeout(() => setToast(null), 4000);
+        }
+        return;
+      }
+      retries++;
+      setTimeout(() => {
+        if (cancelled) return;
+        stopMedia();
+        setup();
+      }, 2500);
+    };
+    v.addEventListener("error", onMediaError);
+
     return () => {
       cancelled = true;
+      v.removeEventListener("error", onMediaError);
       stopMedia();
     };
   }, [playback.videoUrl]);
@@ -278,18 +315,32 @@ export function RoomView({
     return () => clearInterval(id);
   }, [playback.videoUrl, applyPlaybackSync]);
 
-  // F: toggle fullscreen (whole page — first-person view of the screen).
-  // Skipped while typing in chat/settings inputs.
+  // F: full-screen video — the movie fills the whole window (plus real
+  // browser fullscreen when allowed) and every piece of HUD/chat/crosshair
+  // chrome hides. F or Escape brings the world back. Ignored while typing.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.code !== "KeyF") return;
       const t = e.target as HTMLElement | null;
       if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
-      if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
-      else document.documentElement.requestFullscreen().catch(() => {});
+      const next = !theater;
+      setTheater(next);
+      if (next) document.documentElement.requestFullscreen().catch(() => {});
+      else if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
+  }, [theater]);
+
+  // The browser swallows the FIRST Escape while in native fullscreen —
+  // listen for the resulting fullscreenchange so one Escape always leaves
+  // theater mode too.
+  useEffect(() => {
+    const onFs = () => {
+      if (!document.fullscreenElement) setTheater(false);
+    };
+    document.addEventListener("fullscreenchange", onFs);
+    return () => document.removeEventListener("fullscreenchange", onFs);
   }, []);
 
   // Auto-play after a YouTube pick: once the server confirms the selection
@@ -373,16 +424,22 @@ export function RoomView({
     };
   }, []);
 
-  // Escape closes the topmost panel (movie settings / movie browser).
+  // Escape: theater mode first (movie-only view), then the topmost panel
+  // (movie settings / movie browser).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.code !== "Escape") return;
+      if (theater) {
+        setTheater(false);
+        if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+        return;
+      }
       if (showBrowser) setShowBrowser(false);
       else if (showSettings) setShowSettings(false);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [showBrowser, showSettings]);
+  }, [showBrowser, showSettings, theater]);
 
   const handleSend = useCallback(
     (text: string) => {
@@ -397,7 +454,7 @@ export function RoomView({
             roomId: room.roomId,
             senderId: "system",
             senderName: "System",
-            text: "Commands: /help /sit /wave — look at a chair + E to sit, E elsewhere = movie settings, RMB punch, Shift crouch, double-tap W run, T chat, F5 view, F fullscreen, hold Tab for players.",
+            text: "Commands: /help /sit /wave — look at a chair + E to sit, E elsewhere = movie settings, RMB punch, Shift crouch, double-tap W run, T chat, F5 view, F full-screen video, hold Tab for players.",
             timestamp: Date.now(),
             kind: "system" as const,
           },
@@ -423,14 +480,28 @@ export function RoomView({
   };
 
   return (
-    <div className="app-root">
+    <div className={theater ? "app-root theater" : "app-root"}>
       <div ref={containerRef} style={{ position: "absolute", inset: 0 }} />
 
+      {/* Hidden normally (feeds the 3D screen texture). Theater mode: the
+          video itself becomes the entire screen. */}
       <video
         ref={videoRef}
         crossOrigin="anonymous"
         playsInline
-        style={{ display: "none" }}
+        style={
+          theater
+            ? {
+                position: "fixed",
+                inset: 0,
+                width: "100%",
+                height: "100%",
+                objectFit: "contain",
+                background: "#000",
+                zIndex: 45,
+              }
+            : { display: "none" }
+        }
       />
 
       {/* Crosshair (first person) */}
@@ -472,38 +543,8 @@ export function RoomView({
         {/* Chat */}
         <ChatPanel messages={chat} onSend={handleSend} hidden={chatHidden} onToggleHidden={() => setChatHidden((h) => !h)} />
 
-        {/* Bottom-center hints */}
-        <div className="mc-hints">
-          <span>
-            <kbd>WASD</kbd> move
-          </span>
-          <span>
-            <kbd>W×2</kbd> run
-          </span>
-          <span>
-            <kbd>Shift</kbd> crouch
-          </span>
-          <span>
-            <kbd>Space</kbd> jump
-          </span>
-          <span>
-            <kbd>RMB</kbd> punch
-          </span>
-          <span>
-            <kbd>E</kbd> sit / settings
-          </span>
-          <span>
-            <kbd>T</kbd> chat
-          </span>
-          <span>
-            <kbd>F5</kbd> view
-          </span>
-          <span>
-            <kbd>F</kbd> fullscreen
-          </span>
-        </div>
-
-        {/* Playback controls live only inside movie settings (E). */}
+        {/* Playback controls live only inside movie settings (E);
+            bottom hint bar removed — /help covers the controls. */}
       </div>
 
       {/* Tab player list (Minecraft multiplayer style) */}
