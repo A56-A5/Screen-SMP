@@ -1,4 +1,4 @@
-# CineVox — Minecraft-style Multiplayer Watch Party (MVP)
+# Screen SMP — Minecraft-style Multiplayer Watch Party (MVP)
 
 A voxel 3D world where friends gather as blocky characters, walk around a cinema,
 sit in seats, chat, and watch open-license movies together with server-synced playback.

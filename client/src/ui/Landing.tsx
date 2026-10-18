@@ -55,7 +55,7 @@ export function Landing() {
       <div className="mc-dirt-bg" />
       <div className="mc-landing-inner">
         <h1 className="mc-title">
-          Cine<span>Vox</span>
+          Screen <span>SMP</span>
         </h1>
         <p className="mc-tagline">A voxel world where friends watch movies together.</p>
 
