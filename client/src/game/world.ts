@@ -198,7 +198,9 @@ export function buildWorld(): WorldResult {
         maxZ: z + 0.6,
         top: tier + 0.7,
       });
-      seats.push({ x, y: tier + 0.55, z });
+      // Seat spot = pan TOP: sitters sink below it (hip height 0.75), and
+      // standing up snaps feet onto it.
+      seats.push({ x, y: tier + 0.7, z });
     }
   }
 

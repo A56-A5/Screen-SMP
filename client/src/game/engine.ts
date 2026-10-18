@@ -293,7 +293,7 @@ export class Game {
     let bestScore = Infinity;
     for (const s of this.seats) {
       const dx = s.x - p.x;
-      const dy = s.y + 0.4 - eye; // aim at the seat pan, not the floor
+      const dy = s.y - 0.1 - eye; // aim just above the pan top (s.y IS pan top)
       const dz = s.z - p.z;
       const d = Math.hypot(dx, dy, dz);
       if (d > 3 || d < 0.001) continue;
@@ -312,13 +312,20 @@ export class Game {
   private sitOn(best: SeatSpot) {
     this.sitting = true;
     this.velocityY = 0;
-    this.seatPos = new THREE.Vector3(best.x, best.y, best.z);
+    // best.y is the pan top; the hip joint sits 0.75 above the root, so put
+    // the root BELOW the pan to make the butt rest on it instead of floating.
+    this.seatPos = new THREE.Vector3(best.x, best.y - 0.75, best.z);
     // Model front is +Z; π rotates it to face the screen at -Z.
     this.localChar.root.rotation.y = Math.PI;
     this.localChar.setSitting(true);
   }
 
   private stand() {
+    // Lift feet onto the pan before physics kicks in, otherwise the player
+    // would be standing INSIDE the chair collider and be unable to move.
+    if (this.seatPos) {
+      this.localChar.root.position.y = this.seatPos.y + 0.75;
+    }
     this.sitting = false;
     this.seatPos = null;
     this.localChar.setSitting(false);

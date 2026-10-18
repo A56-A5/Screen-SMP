@@ -72,9 +72,13 @@ export function RoomView({
       }
     );
     gameRef.current = game;
+    // Dev/QA hook (production builds strip this via the DEV guard) — lets
+    // automated checks read player position/sitting state.
+    if (import.meta.env.DEV) (window as unknown as { __game?: Game }).__game = game;
     return () => {
       game.dispose();
       gameRef.current = null;
+      if (import.meta.env.DEV) delete (window as unknown as { __game?: Game }).__game;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -238,23 +242,55 @@ export function RoomView({
 
   // Playback sync. Live streams (duration === Infinity) only follow
   // play/pause — their position can't be meaningfully time-corrected.
-  useEffect(() => {
+  const playbackRef = useRef(playback);
+  playbackRef.current = playback;
+
+  const applyPlaybackSync = useCallback(() => {
     const v = videoRef.current;
-    if (!v || !playback.videoUrl) return;
+    const pb = playbackRef.current;
+    if (!v || !pb.videoUrl) return;
     const live = v.duration === Infinity;
     if (!live && v.readyState >= 1) {
-      const elapsed = playback.status === "playing" ? (Date.now() - playback.updatedAt) / 1000 : 0;
-      const expected = playback.position + elapsed;
+      const elapsed = pb.status === "playing" ? (Date.now() - pb.updatedAt) / 1000 : 0;
+      const expected = pb.position + elapsed;
       if (Math.abs(v.currentTime - expected) > 1.5) {
         v.currentTime = expected;
       }
     }
-    if (playback.status === "playing" && v.paused) {
+    if (pb.status === "playing" && v.paused) {
       v.play().catch(() => {});
-    } else if (playback.status === "paused" && !v.paused) {
+    } else if (pb.status === "paused" && !v.paused) {
       v.pause();
     }
-  }, [playback]);
+  }, []);
+
+  // On every movie:state event...
+  useEffect(() => {
+    applyPlaybackSync();
+  }, [playback, applyPlaybackSync]);
+
+  // ...and on a timer: a late joiner finishes loading their video AFTER the
+  // last state event, so without this interval nobody would ever snap them
+  // to the room's current timestamp.
+  useEffect(() => {
+    if (!playback.videoUrl) return;
+    const id = setInterval(applyPlaybackSync, 750);
+    return () => clearInterval(id);
+  }, [playback.videoUrl, applyPlaybackSync]);
+
+  // F: toggle fullscreen (whole page — first-person view of the screen).
+  // Skipped while typing in chat/settings inputs.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.code !== "KeyF") return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+      if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+      else document.documentElement.requestFullscreen().catch(() => {});
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   // Auto-play after a YouTube pick: once the server confirms the selection
   // (status "paused" + matching id), press play for everyone.
@@ -361,7 +397,7 @@ export function RoomView({
             roomId: room.roomId,
             senderId: "system",
             senderName: "System",
-            text: "Commands: /help /sit /wave — look at a chair + E to sit, E elsewhere = movie settings, RMB punch, Shift crouch, double-tap W run, T chat, F5 view, hold Tab for players.",
+            text: "Commands: /help /sit /wave — look at a chair + E to sit, E elsewhere = movie settings, RMB punch, Shift crouch, double-tap W run, T chat, F5 view, F fullscreen, hold Tab for players.",
             timestamp: Date.now(),
             kind: "system" as const,
           },
@@ -461,6 +497,9 @@ export function RoomView({
           </span>
           <span>
             <kbd>F5</kbd> view
+          </span>
+          <span>
+            <kbd>F</kbd> fullscreen
           </span>
         </div>
 
