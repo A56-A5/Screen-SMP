@@ -255,12 +255,14 @@ export function createCharacter(name: string, skin: SkinData): VoxelCharacter {
 
       if (crouching) {
         // Minecraft sneak: the whole upper body (torso + head + shoulder
-        // pivots) leans forward as ONE rigid piece; the head stays aligned
-        // with the back (no extra neck bow); legs stay perfectly straight;
-        // arms hang vertically — counter-rotated by the torso lean so they
-        // remain world-down while the shoulders ride forward with the body.
+        // pivots) leans forward as ONE rigid piece; the head COUNTER-rotates
+        // by the lean amount so the face stays looking straight ahead when
+        // fully crouched; legs stay perfectly straight; arms hang vertically
+        // — counter-rotated by the torso lean so they remain world-down
+        // while the shoulders ride forward with the body.
         leanTo(0.42);
-        head.rotation.x *= 0.85; // never bow the head — decay any look pitch
+        head.rotation.x +=
+          (-bodyHolder.rotation.x - head.rotation.x) * Math.min(1, dt * 12);
         leftLeg.rotation.x *= 0.85; // legs straight down
         rightLeg.rotation.x *= 0.85;
         const s = moving ? Math.sin(phase) * 0.05 : 0;

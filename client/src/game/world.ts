@@ -43,8 +43,9 @@ export interface WorldResult {
   materials: BlockMaterials;
   /** Outdoor lamp point lights (dimmed when the theatre lights go down). */
   lampLights: THREE.PointLight[];
-  /** Warm interior cinema light. */
+  /** Warm interior cinema lights (mid-room + near the screen). */
   cinemaLight: THREE.PointLight;
+  interiorLights: THREE.PointLight[];
   /** Shared glowstone material (emissive dims with the lamps). */
   glowstoneMat: THREE.MeshLambertMaterial;
   /** Sky/ground fill light — killing its intensity is what darkens the room. */
@@ -235,7 +236,7 @@ export function buildWorld(): WorldResult {
     const bulb = block(0.6, 0.6, 0.6, mats.glowstone);
     bulb.position.set(lx, 3.3, lz);
     group.add(bulb);
-    const light = new THREE.PointLight(0xffdf9e, 0.6, 9);
+    const light = new THREE.PointLight(0xffdf9e, 15, 12);
     light.position.set(lx, 3.6, lz);
     group.add(light);
     lampLights.push(light);
@@ -324,16 +325,38 @@ export function buildWorld(): WorldResult {
   const dir = new THREE.DirectionalLight(0xfff2d0, 0.75);
   dir.position.set(12, 22, 8);
   dir.castShadow = true;
-  dir.shadow.mapSize.set(1024, 1024);
-  dir.shadow.camera.left = -25;
-  dir.shadow.camera.right = 25;
-  dir.shadow.camera.top = 25;
-  dir.shadow.camera.bottom = -25;
+  dir.shadow.mapSize.set(2048, 2048);
+  dir.shadow.camera.left = -30;
+  dir.shadow.camera.right = 30;
+  dir.shadow.camera.top = 30;
+  dir.shadow.camera.bottom = -30;
+  dir.shadow.bias = -0.0004;
+  dir.shadow.normalBias = 0.03;
   group.add(dir);
-  // Warm interior light for the cinema
-  const cinemaLight = new THREE.PointLight(0xffe0b0, 0.6, 18);
-  cinemaLight.position.set(0, 6, -16);
+  // Warm interior lights for the cinema. Three.js point lights use inverse-
+  // square falloff (decay 2), so intensities must be high to actually read
+  // across an 8+-block room.
+  const cinemaLight = new THREE.PointLight(0xffe0b0, 45, 28);
+  cinemaLight.position.set(0, 6, -14);
+  cinemaLight.userData.onIntensity = 45;
   group.add(cinemaLight);
+  const screenLight = new THREE.PointLight(0xffe0b0, 25, 18);
+  screenLight.position.set(0, 5, -22);
+  screenLight.userData.onIntensity = 25;
+  group.add(screenLight);
+  const interiorLights = [cinemaLight, screenLight];
+
+  // Every structural/decor mesh must CAST shadows — otherwise the sun
+  // leaks straight through the walls and roof and lights the interior
+  // unevenly (bright toward +x, black away from it) even with "lights off".
+  // The ground only receives.
+  group.traverse((o) => {
+    const mesh = o as THREE.Mesh;
+    if (mesh !== ground && (mesh as THREE.Mesh).isMesh) {
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+    }
+  });
 
   const spawn = new THREE.Vector3(0, 0, 12);
   return {
@@ -345,6 +368,7 @@ export function buildWorld(): WorldResult {
     materials: mats,
     lampLights,
     cinemaLight,
+    interiorLights,
     glowstoneMat: mats.glowstone,
     hemi,
     sun: dir,

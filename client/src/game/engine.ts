@@ -67,7 +67,7 @@ export class Game {
 
   // Theatre light state (lever beside the screen, inside the theatre).
   private lampLights: THREE.PointLight[] = [];
-  private cinemaLight: THREE.PointLight | null = null;
+  private interiorLights: THREE.PointLight[] = [];
   private glowstoneMat: THREE.MeshLambertMaterial | null = null;
   private hemi: THREE.HemisphereLight | null = null;
   private sun: THREE.DirectionalLight | null = null;
@@ -103,7 +103,7 @@ export class Game {
     this.seats = world.seats;
     this.screenMesh = world.screenMesh;
     this.lampLights = world.lampLights;
-    this.cinemaLight = world.cinemaLight;
+    this.interiorLights = world.interiorLights;
     this.glowstoneMat = world.glowstoneMat;
     this.hemi = world.hemi;
     this.sun = world.sun;
@@ -350,8 +350,8 @@ export class Game {
    * up barely visible while the outdoor world stays daylit.
    */
   setLights(on: boolean) {
-    for (const l of this.lampLights) l.intensity = on ? 0.6 : 0.0;
-    if (this.cinemaLight) this.cinemaLight.intensity = on ? 0.9 : 0.02;
+    for (const l of this.lampLights) l.intensity = on ? 15 : 0;
+    for (const l of this.interiorLights) l.intensity = on ? (l.userData.onIntensity ?? 30) : 0;
     if (this.glowstoneMat) this.glowstoneMat.emissiveIntensity = on ? 0.6 : 0.0;
     if (this.hemi) this.hemi.intensity = on ? 0.85 : 0.045;
     if (this.sun) this.sun.intensity = on ? 0.75 : 0.45;
