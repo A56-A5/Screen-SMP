@@ -112,8 +112,16 @@ async function resolveYouTube(videoId: string): Promise<string> {
   );
   const url = stdout.trim().split("\n")[0];
   if (!url?.startsWith("http")) throw new Error("yt-dlp returned no URL");
-  ytUrlCache.set(videoId, { url, expires: Date.now() + YT_URL_TTL });
+  // Respect YouTube's own expire/<unix> stamp — never cache past it.
+  const expMatch = /\/expire\/(\d{10})\//.exec(url);
+  const ytExpiry = expMatch ? Number(expMatch[1]) * 1000 - 5 * 60 * 1000 : Date.now() + YT_URL_TTL;
+  ytUrlCache.set(videoId, { url, expires: Math.min(Date.now() + YT_URL_TTL, ytExpiry) });
   return url;
+}
+
+/** 401/403 from googlevideo = stale signature → drop cache and retry once. */
+function isExpiredStatus(status: number): boolean {
+  return status === 401 || status === 403;
 }
 
 function isAllowedYouTubeHost(host: string): boolean {
@@ -151,63 +159,87 @@ app.get("/api/youtube/stream", async (req, res) => {
   if (!/^[A-Za-z0-9_-]{5,20}$/.test(videoId)) {
     return res.status(400).json({ error: "Invalid videoId." });
   }
-  try {
-    const url = await resolveYouTube(videoId);
-    // Sniff with a tiny ranged GET (read first chunk only, then cancel) —
-    // never buffer whole media files: they stream through instead.
-    const sniff = await fetch(url, {
-      headers: { "user-agent": YT_UA, range: "bytes=0-63" },
-      signal: AbortSignal.timeout(20_000),
-    });
-    if (!sniff.ok) throw new Error(`upstream ${sniff.status}`);
-    let first: Uint8Array | undefined;
-    const reader = sniff.body?.getReader();
-    if (reader) {
-      const { value } = await reader.read();
-      first = value;
-      await reader.cancel().catch(() => {});
-    }
-    const isM3u8 = Buffer.from(first ?? new Uint8Array(0))
-      .toString("latin1")
-      .trimStart()
-      .startsWith("#EXTM3U");
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const url = await resolveYouTube(videoId);
+      // Sniff with a tiny ranged GET (read first chunk only, then cancel) —
+      // never buffer whole media files: they stream through instead.
+      const sniff = await fetch(url, {
+        headers: { "user-agent": YT_UA, range: "bytes=0-63" },
+        signal: AbortSignal.timeout(20_000),
+      });
+      if (isExpiredStatus(sniff.status)) {
+        ytUrlCache.delete(videoId);
+        if (attempt === 0) continue; // re-resolve with a fresh signature
+        return res.status(502).json({ error: "YouTube rejected the stream. Re-select the video." });
+      }
+      if (!sniff.ok) throw new Error(`upstream ${sniff.status}`);
+      let first: Uint8Array | undefined;
+      const reader = sniff.body?.getReader();
+      if (reader) {
+        const { value } = await reader.read();
+        first = value;
+        await reader.cancel().catch(() => {});
+      }
+      const isM3u8 = Buffer.from(first ?? new Uint8Array(0))
+        .toString("latin1")
+        .trimStart()
+        .startsWith("#EXTM3U");
 
-    // HEAD (the client's type-sniff): answer from the probe, no full fetch.
-    if (req.method === "HEAD") {
-      const ct = sniff.headers.get("content-type");
-      if (ct) res.setHeader("content-type", ct);
-      const total = sniff.headers.get("content-range")?.split("/")[1];
-      if (total && total !== "*") res.setHeader("content-length", total);
-      return res.end();
-    }
+      // HEAD (the client's type-sniff): answer from the probe, no full fetch.
+      if (req.method === "HEAD") {
+        const ct = sniff.headers.get("content-type");
+        if (ct) res.setHeader("content-type", ct);
+        const total = sniff.headers.get("content-range")?.split("/")[1];
+        if (total && total !== "*") res.setHeader("content-length", total);
+        return res.end();
+      }
 
-    if (isM3u8) {
-      const full = await fetch(url, { headers: { "user-agent": YT_UA }, signal: AbortSignal.timeout(20_000) });
-      if (!full.ok) throw new Error(`upstream ${full.status}`);
-      const text = await full.text();
-      res.setHeader("content-type", "application/vnd.apple.mpegurl");
-      return res.send(rewriteManifest(text, url));
-    }
+      if (isM3u8) {
+        const full = await fetch(url, { headers: { "user-agent": YT_UA }, signal: AbortSignal.timeout(20_000) });
+        if (isExpiredStatus(full.status)) {
+          ytUrlCache.delete(videoId);
+          if (attempt === 0) continue;
+          return res.status(502).json({ error: "YouTube rejected the stream. Re-select the video." });
+        }
+        if (!full.ok) throw new Error(`upstream ${full.status}`);
+        const text = await full.text();
+        res.setHeader("content-type", "application/vnd.apple.mpegurl");
+        return res.send(rewriteManifest(text, url));
+      }
 
-    // Direct media file (VOD): stream through with Range passthrough.
-    const upstream = await fetch(url, {
-      headers: { "user-agent": YT_UA, ...(req.headers.range ? { range: req.headers.range } : {}) },
-      signal: AbortSignal.timeout(20_000),
-    });
-    if (!upstream.ok) {
+      // Direct media file (VOD): stream through with Range passthrough.
+      // NO timeout signal here — it would also abort the body mid-download
+      // (that crashed the server before via an unhandled pipe error).
+      const upstream = await fetch(url, {
+        headers: { "user-agent": YT_UA, ...(req.headers.range ? { range: req.headers.range } : {}) },
+      });
+      if (isExpiredStatus(upstream.status)) {
+        ytUrlCache.delete(videoId);
+        if (attempt === 0) continue;
+        return res.status(502).json({ error: "YouTube rejected the stream. Re-select the video." });
+      }
+      if (!upstream.ok) {
+        res.status(upstream.status);
+        return res.end();
+      }
       res.status(upstream.status);
-      return res.end();
+      for (const h of ["content-type", "content-length", "content-range", "accept-ranges"]) {
+        const v = upstream.headers.get(h);
+        if (v) res.setHeader(h, v);
+      }
+      if (!upstream.body) return res.end();
+      const stream = Readable.fromWeb(upstream.body as import("node:stream/web").ReadableStream);
+      stream.on("error", () => res.destroy()); // never crash the process
+      res.on("close", () => stream.destroy());
+      stream.pipe(res);
+      return;
+    } catch (err) {
+      if (attempt === 0) continue; // transient (timeout / reset) → one retry
+      console.error("[youtube-proxy]", err);
+      if (!res.headersSent) res.status(502).json({ error: "Could not resolve YouTube stream." });
+      return;
     }
-    res.status(upstream.status);
-    for (const h of ["content-type", "content-length", "content-range", "accept-ranges"]) {
-      const v = upstream.headers.get(h);
-      if (v) res.setHeader(h, v);
-    }
-    if (!upstream.body) return res.end();
-    return Readable.fromWeb(upstream.body as import("node:stream/web").ReadableStream).pipe(res);
-  } catch (err) {
-    console.error("[youtube-proxy]", err);
-    res.status(502).json({ error: "Could not resolve YouTube stream." });
   }
 });
 
@@ -232,6 +264,12 @@ app.get("/api/youtube/seg", async (req, res) => {
       signal: AbortSignal.timeout(20_000),
     });
     if (!upstream.ok) {
+      if (isExpiredStatus(upstream.status)) {
+        // Stale signed segment URL: drop the cached master so the next
+        // manifest refresh re-resolves with a fresh signature.
+        const idMatch = /\/id\/([A-Za-z0-9_-]{5,20})/.exec(parsed.pathname);
+        if (idMatch) ytUrlCache.delete(idMatch[1]);
+      }
       res.status(upstream.status);
       return res.end();
     }
@@ -478,4 +516,23 @@ server.on("error", (err: NodeJS.ErrnoException) => {
 
 server.listen(PORT, () => {
   console.log(`[cinevox] server listening on :${PORT} (cors: ${CLIENT_ORIGIN})`);
+});
+
+// Always release the port on Ctrl-C / SIGTERM — no lingering listeners.
+function shutdown(signal: string): void {
+  console.log(`[cinevox] ${signal} — closing server`);
+  io.close();
+  server.close(() => process.exit(0));
+  setTimeout(() => process.exit(0), 1500).unref();
+}
+process.on("SIGINT", () => shutdown("SIGINT"));
+process.on("SIGTERM", () => shutdown("SIGTERM"));
+
+// Never let a stray async error take the whole server down — log and keep
+// serving (clients get 5xx responses from their individual requests).
+process.on("unhandledRejection", (reason) => {
+  console.error("[cinevox] unhandledRejection:", reason);
+});
+process.on("uncaughtException", (err) => {
+  console.error("[cinevox] uncaughtException:", err);
 });

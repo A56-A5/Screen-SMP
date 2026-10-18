@@ -14,11 +14,10 @@ import {
 } from "../net/socket";
 import type { ChatMessage, PlaybackState, RoomState, SampleVideo, PlayerState } from "../net/types";
 import { isYouTubeSource } from "../net/youtube";
+import Hls from "hls.js";
 import { ChatPanel } from "./ChatPanel";
 import { MovieBrowser } from "./MovieBrowser";
 import { MovieSettings } from "./MovieSettings";
-import Hls from "hls.js";
-import { TheaterControls } from "./TheaterControls";
 
 /** Ambient test video shown on the cinema screen whenever no movie is selected. */
 const TEST_YT_VIDEO_ID = "rFZHOHl-L8A";
@@ -157,18 +156,42 @@ export function RoomView({
     const v = videoRef.current;
     const g = gameRef.current;
     if (!v || !g) return;
-    hlsRef.current?.destroy();
-    hlsRef.current = null;
+
+    // Fully stop whatever played before — hls.destroy() alone lets the
+    // element keep playing buffered audio (the "lofi keeps going" bug).
+    const stopMedia = () => {
+      hlsRef.current?.destroy();
+      hlsRef.current = null;
+      const el = videoRef.current;
+      if (!el) return;
+      el.pause();
+      el.removeAttribute("src");
+      el.load();
+    };
+
+    stopMedia();
     let cancelled = false;
 
-    const attachHls = (src: string) => {
+    const attachHls = (src: string, reload = 0) => {
       v.removeAttribute("src");
       v.load();
       const hls = new Hls({ enableWorker: true });
       hls.loadSource(src);
       hls.attachMedia(v);
       hls.on(Hls.Events.ERROR, (_evt, data) => {
-        if (data.fatal) console.warn("[ambient-hls]", data.details);
+        if (!data.fatal) return;
+        // Expired signed URLs / transient network: re-attach (server drops
+        // its stale cache on 403, so a reload gets fresh signatures).
+        if (reload < 3 && data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+          console.warn("[hls] network error, reloading:", data.details);
+          setTimeout(() => {
+            if (cancelled) return;
+            stopMedia();
+            attachHls(src, reload + 1);
+          }, 2000);
+          return;
+        }
+        console.warn("[hls] fatal:", data.details);
       });
       hlsRef.current = hls;
     };
@@ -209,8 +232,7 @@ export function RoomView({
     g.attachVideo(v);
     return () => {
       cancelled = true;
-      hlsRef.current?.destroy();
-      hlsRef.current = null;
+      stopMedia();
     };
   }, [playback.videoUrl]);
 
@@ -442,17 +464,7 @@ export function RoomView({
           </span>
         </div>
 
-        {/* Theater controls */}
-        {playback.videoUrl && (
-          <TheaterControls
-            playback={playback}
-            isHost={isHost}
-            onPlay={playMovie}
-            onPause={pauseMovie}
-            onSeek={seekMovie}
-            title={playback.title ?? ""}
-          />
-        )}
+        {/* Playback controls live only inside movie settings (E). */}
       </div>
 
       {/* Tab player list (Minecraft multiplayer style) */}

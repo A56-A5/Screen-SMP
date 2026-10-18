@@ -494,22 +494,34 @@ export class Game {
     const dx = (r * cos - f * sin) * speed * dt;
     const dz = (-r * sin - f * cos) * speed * dt;
 
-    const nextX = pos.x + dx;
-    if (!this.collides(nextX, pos.y, pos.z)) pos.x = nextX;
-    const nextZ = pos.z + dz;
-    if (!this.collides(pos.x, pos.y, nextZ)) pos.z = nextZ;
-
     // Gravity + land on the highest platform/seat under the player
     // (stadium tiers, benches, seats) instead of only y=0.
     this.velocityY -= 22 * dt;
-    pos.y += this.velocityY * dt;
-    const groundY = this.groundHeightAt(pos.x, pos.z, pos.y);
-    if (pos.y <= groundY) {
-      pos.y = groundY;
-      this.velocityY = 0;
-      this.onGround = true;
-    } else {
-      this.onGround = false;
+    if (this.velocityY < -40) this.velocityY = -40; // terminal clamp
+    const dy = this.velocityY * dt;
+
+    // Substep the whole move so no axis travels more than 0.2 per step.
+    // Endpoint-only checks let fast falls tunnel through 1-unit blocks on
+    // frame spikes — this makes that impossible.
+    const maxMove = Math.max(Math.abs(dx), Math.abs(dy), Math.abs(dz));
+    const steps = Math.max(1, Math.ceil(maxMove / 0.2));
+    const sdx = dx / steps;
+    const sdy = dy / steps;
+    const sdz = dz / steps;
+    for (let i = 0; i < steps; i++) {
+      const nextX = pos.x + sdx;
+      if (!this.collides(nextX, pos.y, pos.z)) pos.x = nextX;
+      const nextZ = pos.z + sdz;
+      if (!this.collides(pos.x, pos.y, nextZ)) pos.z = nextZ;
+      pos.y += sdy;
+      const groundY = this.groundHeightAt(pos.x, pos.z, pos.y);
+      if (pos.y <= groundY) {
+        pos.y = groundY;
+        this.velocityY = 0;
+        this.onGround = true;
+      } else {
+        this.onGround = false;
+      }
     }
 
     pos.x = Math.max(-19, Math.min(19, pos.x));
