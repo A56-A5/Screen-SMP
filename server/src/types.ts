@@ -10,12 +10,6 @@ export interface Appearance {
   bodyColor: string;
   headColor: string;
   accentColor: string;
-  /** Direct URL to a Minecraft skin texture (textures.minecraft.net). */
-  skinUrl?: string;
-  /** Data-URL PNG for a custom uploaded skin (takes precedence over skinUrl). */
-  skinData?: string;
-  /** Arm model width. */
-  model?: "classic" | "slim";
 }
 
 export type AnimationState = "idle" | "walking" | "running" | "jumping" | "sitting" | "crouching";
@@ -82,6 +76,7 @@ export interface RoomState {
   players: PlayerState[];
   hostId: string;
   playback: PlaybackState;
+  lightsOn: boolean;
   serverTime: number;
 }
 

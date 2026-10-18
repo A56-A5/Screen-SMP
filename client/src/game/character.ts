@@ -1,11 +1,5 @@
 import * as THREE from "three";
-import {
-  buildSkinnedParts,
-  createSteveSkin,
-  loadSkin,
-  loadSkinFromDataUrl,
-  type SkinData,
-} from "./skin";
+import { buildSkinnedParts, type SkinData } from "./skin";
 
 /**
  * A Minecraft-style player: skinned box body (head/body/arms/legs), a
@@ -33,7 +27,6 @@ export interface VoxelCharacter {
   /** Right-arm wave animation (~1.2s), overwrites arm swing while active. */
   wave(): void;
   setSkin(skin: SkinData): void;
-  applyAppearance(opts: { skinUrl?: string; skinData?: string; model?: "classic" | "slim" }): void;
   update(dt: number): void;
   dispose(): void;
 }
@@ -84,11 +77,18 @@ export function createCharacter(name: string, skin: SkinData): VoxelCharacter {
   let parts = buildSkinnedParts(skin);
 
   // Wrap limb meshes in pivot Groups so rotation is at the shoulder/hip.
+  // Head pivots at the neck (y1.5) and the body at the hip (y0.75) so a
+  // crouch lean reads as a torso bend instead of swinging the whole mesh
+  // around the feet.
   const head = new THREE.Group();
+  head.position.y = 1.5;
+  parts.head.position.y = 0.25;
   head.add(parts.head);
   root.add(head);
 
   const bodyHolder = new THREE.Group();
+  bodyHolder.position.y = 0.75;
+  parts.body.position.y = 0.375;
   bodyHolder.add(parts.body);
   root.add(bodyHolder);
 
@@ -123,7 +123,6 @@ export function createCharacter(name: string, skin: SkinData): VoxelCharacter {
   let moving = false;
   let running = false;
   let sitting = false;
-  let jumping = false;
   let crouching = false;
   let punchT = -1; // >= 0 while a punch animation plays
   let waveT = -1; // >= 0 while a wave animation plays
@@ -147,8 +146,9 @@ export function createCharacter(name: string, skin: SkinData): VoxelCharacter {
     setSitting(v) {
       sitting = v;
     },
-    setJumping(v) {
-      jumping = v;
+    setJumping() {
+      // Kept for the network animation payload; physical jumping is handled
+      // by the engine and has no dedicated pose anymore.
     },
     setCrouching(v) {
       crouching = v;
@@ -172,10 +172,12 @@ export function createCharacter(name: string, skin: SkinData): VoxelCharacter {
       parts = buildSkinnedParts(newSkin);
       currentSkin = newSkin;
 
-      // Swap meshes inside their holders/groups.
+      // Swap meshes inside their holders/groups (pivots live on the holders).
       head.clear();
+      parts.head.position.y = 0.25;
       head.add(parts.head);
       bodyHolder.clear();
+      parts.body.position.y = 0.375;
       bodyHolder.add(parts.body);
 
       parts.rightArm.position.set(0, 0, 0);
@@ -195,16 +197,6 @@ export function createCharacter(name: string, skin: SkinData): VoxelCharacter {
       leftLeg.add(parts.leftLeg);
 
       oldParts.dispose();
-    },
-
-    applyAppearance(opts) {
-      if (opts.skinData) {
-        loadSkinFromDataUrl(opts.skinData, opts.model ?? "classic").then((s) => character.setSkin(s));
-      } else if (opts.skinUrl) {
-        loadSkin(opts.skinUrl, opts.model ?? "classic").then((s) => character.setSkin(s));
-      } else {
-        character.setSkin(createSteveSkin());
-      }
     },
 
     update(dt: number) {
@@ -229,12 +221,17 @@ export function createCharacter(name: string, skin: SkinData): VoxelCharacter {
           rightArm.rotation.z = 0;
         }
       };
+      // Smoothly ease the torso lean toward a target angle (radians).
+      const leanTo = (target: number) => {
+        bodyHolder.rotation.x += (target - bodyHolder.rotation.x) * Math.min(1, dt * 12);
+      };
 
       // Minecraft rule: limbs swing whenever the player moves horizontally,
       // even while jumping. Only a stationary mid-air pose tucks the limbs.
       const swing = moving && !sitting;
 
       if (sitting) {
+        leanTo(0);
         leftLeg.rotation.x = -Math.PI / 2;
         rightLeg.rotation.x = -Math.PI / 2;
         leftArm.rotation.x = 0.3;
@@ -246,22 +243,24 @@ export function createCharacter(name: string, skin: SkinData): VoxelCharacter {
       }
 
       if (crouching) {
-        // Sneak pose: both thighs angle FORWARD (negative = forward on this
-        // rig), reading as bent knees / lowered body like Minecraft sneak.
-        // Slow shuffle while moving, arms nearly hanging at the sides.
-        const s = moving ? Math.sin(phase) : 0;
+        // Sneak: whole torso leans forward (hip pivot), head follows a
+        // little, legs stay nearly straight with a tiny shuffle, arms hang
+        // forward with the lean.
+        leanTo(0.55);
+        head.rotation.x += (0.25 - head.rotation.x) * Math.min(1, dt * 12);
+        const s = moving ? Math.sin(phase) * 0.12 : 0;
         if (moving) phase += dt * 6;
-        leftLeg.rotation.x = -0.55 + s * 0.3;
-        rightLeg.rotation.x = -0.55 - s * 0.3;
-        leftArm.rotation.x = -0.1 - s * 0.25;
-        rightArm.rotation.x = -0.1 + s * 0.25;
+        leftLeg.rotation.x = -0.12 + s;
+        rightLeg.rotation.x = -0.12 - s;
+        leftArm.rotation.x = -0.45 - s * 0.5;
+        rightArm.rotation.x = -0.45 + s * 0.5;
         leftArm.rotation.z = 0.05;
         rightArm.rotation.z = -0.05;
-        head.rotation.x *= 0.9;
-        head.rotation.y *= 0.9;
         applyGestures();
         return;
       }
+
+      leanTo(0);
 
       if (swing) {
         const speed = running ? 11 : 7.5;
@@ -272,14 +271,6 @@ export function createCharacter(name: string, skin: SkinData): VoxelCharacter {
         rightLeg.rotation.x = -s;
         leftArm.rotation.x = -s * 0.85;
         rightArm.rotation.x = s * 0.85;
-        leftArm.rotation.z = 0;
-        rightArm.rotation.z = 0;
-      } else if (jumping) {
-        // Stationary jump: arms up, legs slightly bent — classic Minecraft.
-        leftLeg.rotation.x = 0.4;
-        rightLeg.rotation.x = 0.2;
-        leftArm.rotation.x = -0.9;
-        rightArm.rotation.x = -0.9;
         leftArm.rotation.z = 0;
         rightArm.rotation.z = 0;
       } else {

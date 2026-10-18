@@ -11,6 +11,7 @@ import {
   playMovie,
   pauseMovie,
   seekMovie,
+  toggleLights,
 } from "../net/socket";
 import type { ChatMessage, PlaybackState, RoomState, SampleVideo, PlayerState } from "../net/types";
 import { isYouTubeSource } from "../net/youtube";
@@ -71,9 +72,11 @@ export function RoomView({
         onInteract: () => setShowSettings(true),
         onFirstPersonChange: (fp) => setFirstPerson(fp),
         onPunch: () => sendEmote("punch"),
+        onToggleLights: () => toggleLights(),
       }
     );
     gameRef.current = game;
+    game.setLights(initialRoom.lightsOn);
     // Dev/QA hook (production builds strip this via the DEV guard) — lets
     // automated checks read player position/sitting state.
     if (import.meta.env.DEV) (window as unknown as { __game?: Game }).__game = game;
@@ -94,6 +97,7 @@ export function RoomView({
         setPlayers(state.players);
         setPlayback(state.playback);
         gameRef.current?.syncRemoteList(state.players, myId);
+        gameRef.current?.setLights(state.lightsOn);
       },
       onPlayerJoin: (p) => {
         if (!p) return;
@@ -119,10 +123,13 @@ export function RoomView({
         gameRef.current?.setRemoteSpeaking(playerId, speaking);
       },
       onPlayerEmote: ({ playerId, emote }) => {
+        // Punches animate silently (the punch itself is the message).
+        if (emote === "punch") {
+          gameRef.current?.punchRemote(playerId);
+          return;
+        }
         if (emote === "wave") gameRef.current?.waveRemote(playerId);
-        if (emote === "punch") gameRef.current?.punchRemote(playerId);
         const name = players.find((p) => p.id === playerId)?.name ?? "Someone";
-        const verb = emote === "punch" ? "throws a punch!" : "waves!";
         setChat((c) => [
           ...c.slice(-99),
           {
@@ -130,7 +137,7 @@ export function RoomView({
             roomId: room.roomId,
             senderId: "system",
             senderName: "System",
-            text: `${name} ${verb}`,
+            text: `${name} waves!`,
             timestamp: Date.now(),
             kind: "emote" as const,
           },
@@ -138,6 +145,10 @@ export function RoomView({
       },
       onChat: (msg) => setChat((c) => [...c.slice(-99), msg]),
       onMovieState: ({ playback: pb }) => setPlayback(pb),
+      onLights: ({ lightsOn }) => {
+        gameRef.current?.setLights(lightsOn);
+        setRoom((r) => ({ ...r, lightsOn }));
+      },
       onRooms: () => {},
       onCatalog: (videos) => setCatalog(videos),
       onError: ({ error }) => {
@@ -444,8 +455,10 @@ export function RoomView({
   const handleSend = useCallback(
     (text: string) => {
       // Handle /commands
-      if (text === "/wave") gameRef.current?.wave();
-      else if (text === "/sit") gameRef.current?.toggleSit();
+      if (text === "/wave") {
+        gameRef.current?.wave();
+        sendEmote("wave");
+      } else if (text === "/sit") gameRef.current?.toggleSit();
       else if (text === "/help") {
         setChat((c) => [
           ...c,
@@ -454,7 +467,7 @@ export function RoomView({
             roomId: room.roomId,
             senderId: "system",
             senderName: "System",
-            text: "Commands: /help /sit /wave — look at a chair + E to sit, E elsewhere = movie settings, RMB punch, Shift crouch, double-tap W run, T chat, F5 view, F full-screen video, hold Tab for players.",
+            text: "Commands: /help /sit /wave — look at a chair + E to sit, E on the light lever dims the lights, E elsewhere = movie settings, RMB punch, Shift crouch, double-tap W run (W or S cancels), T chat, F5 view, F full-screen video, hold Tab for players.",
             timestamp: Date.now(),
             kind: "system" as const,
           },

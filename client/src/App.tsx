@@ -25,6 +25,7 @@ export default function App() {
       onPlayerEmote: () => {},
       onChat: () => {},
       onMovieState: () => {},
+      onLights: ({ lightsOn }) => setRoom((r) => (r ? { ...r, lightsOn } : r)),
       onRooms: () => {},
       onCatalog: () => {},
       onError: () => {},

@@ -1,7 +1,7 @@
 import * as THREE from "three";
-import { buildWorld, type Collider, type SeatSpot } from "./world";
+import { buildWorld, type Collider, type SeatSpot, type WorldResult } from "./world";
 import { createCharacter, punchCurve, type VoxelCharacter } from "./character";
-import { createSteveSkin, type SkinData } from "./skin";
+import { createSteveSkin } from "./skin";
 import type { Appearance, PlayerState, Vec3 } from "../net/types";
 
 export interface GameCallbacks {
@@ -11,6 +11,8 @@ export interface GameCallbacks {
   onFirstPersonChange: (firstPerson: boolean) => void;
   /** Fired when the local player punches (broadcast as an emote). */
   onPunch?: () => void;
+  /** Fired when the player toggles the theatre light lever. */
+  onToggleLights?: () => void;
 }
 
 interface RemoteEntry {
@@ -37,7 +39,6 @@ export class Game {
   private videoTexture: THREE.VideoTexture | null = null;
 
   private localChar: VoxelCharacter;
-  private localSkin: SkinData;
   private remotes = new Map<string, RemoteEntry>();
 
   private velocityY = 0;
@@ -64,10 +65,17 @@ export class Game {
   private fpHandPhase = 0;
   private fpPunchT = -1;
 
+  // Theatre light state (lever near the entrance).
+  private lampLights: THREE.PointLight[] = [];
+  private cinemaLight: THREE.PointLight | null = null;
+  private glowstoneMat: THREE.MeshLambertMaterial | null = null;
+  private leverHandle: THREE.Mesh | null = null;
+  private leverSpot: { x: number; y: number; z: number } | null = null;
+
   constructor(
     private container: HTMLElement,
     localName: string,
-    localAppearance: Appearance,
+    _localAppearance: Appearance,
     private callbacks: GameCallbacks
   ) {
     this.renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -87,21 +95,24 @@ export class Game {
       200
     );
 
-    const world = buildWorld();
+    const world: WorldResult = buildWorld();
     this.scene.add(world.group);
     this.colliders = world.colliders;
     this.seats = world.seats;
     this.screenMesh = world.screenMesh;
+    this.lampLights = world.lampLights;
+    this.cinemaLight = world.cinemaLight;
+    this.glowstoneMat = world.glowstoneMat;
+    this.leverHandle = world.leverHandle;
+    this.leverSpot = world.leverSpot;
 
-    this.localSkin = createSteveSkin();
-    this.localChar = createCharacter(localName, this.localSkin);
+    this.localChar = createCharacter(localName, createSteveSkin());
     this.localChar.root.position.copy(world.spawn);
     this.localChar.root.visible = false; // hidden in first person
     this.scene.add(this.localChar.root);
 
     // Build a first-person hand from the same skin.
     this.buildFpHand();
-    this.applyAppearance(localAppearance);
 
     this.bindEvents();
     this.animate();
@@ -119,14 +130,6 @@ export class Game {
     this.fpHand.rotation.set(-0.4, 0.3, 0.15);
     this.camera.add(this.fpHand);
     this.scene.add(this.camera);
-  }
-
-  applyAppearance(appearance: Appearance) {
-    this.localChar.applyAppearance({
-      skinUrl: appearance.skinUrl,
-      skinData: appearance.skinData,
-      model: appearance.model,
-    });
   }
 
   setLocalName(name: string) {
@@ -165,8 +168,9 @@ export class Game {
       if (now - this.lastWTap < SPRINT_DOUBLE_TAP_MS) this.sprinting = true;
       this.lastWTap = now;
     }
-    // Changing direction cancels sprint.
-    if (e.code === "KeyS" || e.code === "KeyA" || e.code === "KeyD") this.sprinting = false;
+    // Directional cancels: S (backwards) only. Strafing with A/D keeps the
+    // sprint — a toggle you release by letting go of W (or pressing S).
+    if (e.code === "KeyS") this.sprinting = false;
 
     this.keys.add(e.code);
     if (e.code === "KeyE") this.handleE();
@@ -265,8 +269,9 @@ export class Game {
 
   // ---------- interactions ----------
   /**
-   * E: stand up if sitting; sit if a chair is in the crosshair (within ~3
-   * blocks); otherwise open movie settings — works from anywhere.
+   * E: stand up if sitting; sit if a chair is in the crosshair; toggle the
+   * light lever if it's in the crosshair; otherwise open movie settings —
+   * works from anywhere.
    */
   private handleE() {
     if (this.sitting) {
@@ -276,6 +281,10 @@ export class Game {
     const seat = this.seatInSight();
     if (seat) {
       this.sitOn(seat);
+      return;
+    }
+    if (this.leverInSight()) {
+      this.callbacks.onToggleLights?.();
       return;
     }
     this.releasePointer();
@@ -307,6 +316,31 @@ export class Game {
       }
     }
     return best;
+  }
+
+  /** Is the light lever within ~3 blocks and inside a ~50° look cone? */
+  private leverInSight(): boolean {
+    if (!this.leverSpot) return false;
+    const p = this.localChar.root.position;
+    const fx = -Math.sin(this.yaw) * Math.cos(this.pitch);
+    const fy = Math.sin(this.pitch);
+    const fz = -Math.cos(this.yaw) * Math.cos(this.pitch);
+    const dx = this.leverSpot.x - p.x;
+    const dy = this.leverSpot.y - (p.y + EYE_HEIGHT);
+    const dz = this.leverSpot.z - p.z;
+    const d = Math.hypot(dx, dy, dz);
+    if (d > 3 || d < 0.001) return false;
+    const inv = 1 / d;
+    const dot = fx * dx * inv + fy * dy * inv + fz * dz * inv;
+    return dot >= 0.7;
+  }
+
+  /** Apply light state locally (called on join and on every lights:state). */
+  setLights(on: boolean) {
+    for (const l of this.lampLights) l.intensity = on ? 0.6 : 0.03;
+    if (this.cinemaLight) this.cinemaLight.intensity = on ? 0.6 : 0.08;
+    if (this.glowstoneMat) this.glowstoneMat.emissiveIntensity = on ? 0.6 : 0.04;
+    if (this.leverHandle) this.leverHandle.rotation.x = on ? -0.6 : 0.7;
   }
 
   private sitOn(best: SeatSpot) {
@@ -373,13 +407,7 @@ export class Game {
   // ---------- remote players ----------
   addRemote(player: PlayerState) {
     if (this.remotes.has(player.id)) return;
-    const skin = createSteveSkin();
-    const ch = createCharacter(player.name, skin);
-    ch.applyAppearance({
-      skinUrl: player.appearance.skinUrl,
-      skinData: player.appearance.skinData,
-      model: player.appearance.model,
-    });
+    const ch = createCharacter(player.name, createSteveSkin());
     ch.root.position.set(player.position.x, player.position.y, player.position.z);
     this.scene.add(ch.root);
     this.remotes.set(player.id, {

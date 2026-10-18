@@ -41,6 +41,16 @@ export interface WorldResult {
   screenMesh: THREE.Mesh;
   spawn: THREE.Vector3;
   materials: BlockMaterials;
+  /** Outdoor lamp point lights (dimmed when the theatre lights go down). */
+  lampLights: THREE.PointLight[];
+  /** Warm interior cinema light. */
+  cinemaLight: THREE.PointLight;
+  /** Shared glowstone material (emissive dims with the lamps). */
+  glowstoneMat: THREE.MeshLambertMaterial;
+  /** Pivoting lever handle mesh near the entrance. */
+  leverHandle: THREE.Mesh;
+  /** Interaction point for the lever (E while looking at it). */
+  leverSpot: { x: number; y: number; z: number };
 }
 
 export function buildWorld(): WorldResult {
@@ -205,6 +215,7 @@ export function buildWorld(): WorldResult {
   }
 
   // --- Glowstone lamps on log posts along the path ---
+  const lampLights: THREE.PointLight[] = [];
   const lampSpots: [number, number][] = [
     [-3, 10],
     [3, 10],
@@ -223,7 +234,32 @@ export function buildWorld(): WorldResult {
     const light = new THREE.PointLight(0xffdf9e, 0.6, 9);
     light.position.set(lx, 3.6, lz);
     group.add(light);
+    lampLights.push(light);
   }
+
+  // --- Theatre light lever: wooden post just outside the entrance (right) ---
+  const leverX = 2.5;
+  const leverZ = -5.5;
+  const leverPost = block(0.4, 1.8, 0.4, mats.logSide);
+  leverPost.position.set(leverX, 0.9, leverZ);
+  group.add(leverPost);
+  const leverMount = block(0.5, 0.35, 0.5, mats.stoneBrick);
+  leverMount.position.set(leverX, 1.55, leverZ);
+  group.add(leverMount);
+  // Pivoting stone handle, pivot at the mount top. Up = lights on.
+  const leverHandleGeo = new THREE.BoxGeometry(0.14, 0.55, 0.14);
+  leverHandleGeo.translate(0, 0.275, 0);
+  const leverHandle = new THREE.Mesh(leverHandleGeo, mats.stoneBrick);
+  leverHandle.position.set(leverX, 1.7, leverZ);
+  leverHandle.rotation.x = -0.6;
+  group.add(leverHandle);
+  colliders.push({
+    minX: leverX - 0.25,
+    maxX: leverX + 0.25,
+    minZ: leverZ - 0.25,
+    maxZ: leverZ + 0.25,
+    top: 1.8,
+  });
 
   // --- Trees (log trunk + leaf cubes) ---
   const treeSpots: [number, number][] = [
@@ -295,7 +331,19 @@ export function buildWorld(): WorldResult {
   group.add(cinemaLight);
 
   const spawn = new THREE.Vector3(0, 0, 12);
-  return { group, colliders, seats, screenMesh, spawn, materials: mats };
+  return {
+    group,
+    colliders,
+    seats,
+    screenMesh,
+    spawn,
+    materials: mats,
+    lampLights,
+    cinemaLight,
+    glowstoneMat: mats.glowstone,
+    leverHandle,
+    leverSpot: { x: leverX, y: 1.5, z: leverZ },
+  };
 }
 
 // re-export for textures used elsewhere

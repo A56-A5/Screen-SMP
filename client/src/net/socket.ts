@@ -27,6 +27,7 @@ export interface RoomEvents {
   onPlayerEmote: (s: { playerId: string; emote: string }) => void;
   onChat: (msg: ChatMessage) => void;
   onMovieState: (p: { playback: PlaybackState }) => void;
+  onLights: (p: { lightsOn: boolean }) => void;
   onRooms: (rooms: RoomSummary[]) => void;
   onCatalog: (videos: SampleVideo[]) => void;
   onError: (e: { event: string; error: string }) => void;
@@ -45,6 +46,7 @@ export function attachRoomEvents(h: RoomEvents): () => void {
   s.on("player:emote", wrap((p: any) => h.onPlayerEmote(p)));
   s.on("chat:message", wrap((p: any) => h.onChat(p)));
   s.on("movie:state", wrap((p: any) => h.onMovieState(p)));
+  s.on("lights:state", wrap((p: any) => h.onLights(p)));
   s.on("rooms:updated", wrap((p: any) => h.onRooms(p.rooms)));
   s.on("videos:catalog", wrap((p: any) => h.onCatalog(p.videos)));
   s.on("error:msg", wrap((p: any) => h.onError(p)));
@@ -59,6 +61,7 @@ export function attachRoomEvents(h: RoomEvents): () => void {
     s.off("player:emote");
     s.off("chat:message");
     s.off("movie:state");
+    s.off("lights:state");
     s.off("rooms:updated");
     s.off("videos:catalog");
     s.off("error:msg");
@@ -86,6 +89,9 @@ export function sendEmote(emote: string) {
 }
 export function sendChat(text: string) {
   getSocket().emit("chat:send", { text });
+}
+export function toggleLights() {
+  getSocket().emit("lights:toggle");
 }
 export function selectVideo(videoId: string) {
   getSocket().emit("movie:select", { videoId });

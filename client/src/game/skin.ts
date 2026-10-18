@@ -212,30 +212,6 @@ export function createSteveSkin(): SkinData {
   return { texture: canvasToTexture(drawSteveCanvas()), model: "classic" };
 }
 
-/** Load a skin from a URL (Mojang CDN) or a data-URL. Falls back to Steve. */
-export function loadSkin(url: string, model: "classic" | "slim" = "classic"): Promise<SkinData> {
-  return new Promise((resolve) => {
-    const img = new Image();
-    if (!url.startsWith("data:")) img.crossOrigin = "anonymous";
-    img.onload = () => {
-      const c = document.createElement("canvas");
-      c.width = TEX;
-      c.height = img.height >= 64 ? 64 : 32; // support legacy 64x32
-      const ctx = c.getContext("2d")!;
-      ctx.imageSmoothingEnabled = false;
-      ctx.drawImage(img, 0, 0, TEX, c.height);
-      // Legacy 64x32: mirror right limbs onto left.
-      if (c.height === 32) {
-        // copy right arm -> left arm area, right leg -> left leg area
-        ctx.drawImage(c, 40, 16, 16, 16, 32, 48, 16, 16);
-      }
-      resolve({ texture: canvasToTexture(c), model });
-    };
-    img.onerror = () => resolve(createSteveSkin());
-    img.src = url;
-  });
-}
-
 /**
  * Build a set of skinned geometries (head, body, arms, legs) ready to assemble
  * into a character group. All geometries share the provided texture via materials.
@@ -290,22 +266,24 @@ export function buildSkinnedParts(skin: SkinData): SkinnedParts {
   const body = new THREE.Mesh(bodyGeo, mat);
   body.position.y = 1.125;
 
-  // Arms pivot at shoulder (top of mesh).
+  // Arms pivot at shoulder (top of mesh). The model FACES +Z, which makes
+  // its true right side -X (right = forward x up). Limbs used to sit on the
+  // mirrored side, so the punch/wave animated the wrong arm visually.
   const rightArm = new THREE.Mesh(raGeo, mat);
   rightArm.geometry.translate(0, -0.375, 0);
-  rightArm.position.set(armX, 1.5, 0);
+  rightArm.position.set(-armX, 1.5, 0);
 
   const leftArm = new THREE.Mesh(laGeo, mat);
   leftArm.geometry.translate(0, -0.375, 0);
-  leftArm.position.set(-armX, 1.5, 0);
+  leftArm.position.set(armX, 1.5, 0);
 
   const rightLeg = new THREE.Mesh(rlGeo, mat);
   rightLeg.geometry.translate(0, -0.375, 0);
-  rightLeg.position.set(0.125, 0.75, 0);
+  rightLeg.position.set(-0.125, 0.75, 0);
 
   const leftLeg = new THREE.Mesh(llGeo, mat);
   leftLeg.geometry.translate(0, -0.375, 0);
-  leftLeg.position.set(-0.125, 0.75, 0);
+  leftLeg.position.set(0.125, 0.75, 0);
 
   return {
     head,
@@ -321,26 +299,3 @@ export function buildSkinnedParts(skin: SkinData): SkinnedParts {
   };
 }
 
-// --- Skin fetch cache (client-side) ---
-const fetchCache = new Map<string, Promise<SkinData>>();
-
-export function fetchSkinByUsername(username: string): Promise<SkinData> {
-  const key = username.toLowerCase();
-  if (fetchCache.has(key)) return fetchCache.get(key)!;
-  const p = (async () => {
-    try {
-      const res = await fetch(`/api/skin/${encodeURIComponent(username)}`);
-      if (!res.ok) return createSteveSkin();
-      const data = (await res.json()) as { skinUrl: string; model: "classic" | "slim" };
-      return loadSkin(data.skinUrl, data.model);
-    } catch {
-      return createSteveSkin();
-    }
-  })();
-  fetchCache.set(key, p);
-  return p;
-}
-
-export function loadSkinFromDataUrl(dataUrl: string, model: "classic" | "slim" = "classic"): Promise<SkinData> {
-  return loadSkin(dataUrl, model);
-}

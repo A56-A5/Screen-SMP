@@ -27,71 +27,6 @@ app.get("/api/videos", (_req, res) => {
   res.json({ videos: SAMPLE_VIDEOS });
 });
 
-// --- Mojang skin proxy ---
-// Resolves a Minecraft username to a skin texture URL via Mojang's public APIs.
-// Keeps API usage server-side and adds a tiny in-memory cache.
-const skinCache = new Map<string, { skinUrl: string; model: string; expires: number }>();
-const SKIN_CACHE_TTL = 10 * 60 * 1000;
-
-app.get("/api/skin/:username", async (req, res) => {
-  const username = String(req.params.username ?? "").trim();
-  if (!/^[A-Za-z0-9_]{3,16}$/.test(username)) {
-    return res.status(400).json({ error: "Invalid Minecraft username (3-16 letters/numbers/underscore)." });
-  }
-
-  const cached = skinCache.get(username.toLowerCase());
-  if (cached && cached.expires > Date.now()) {
-    return res.json({ skinUrl: cached.skinUrl, model: cached.model, cached: true });
-  }
-
-  try {
-    // Step 1: username -> UUID
-    const profileRes = await fetch(
-      `https://api.mojang.com/users/profiles/minecraft/${encodeURIComponent(username)}`,
-      { signal: AbortSignal.timeout(5000) }
-    );
-    if (!profileRes.ok) {
-      return res.status(404).json({ error: `Minecraft user "${username}" not found.` });
-    }
-    const profile = (await profileRes.json()) as { id: string; name: string };
-
-    // Step 2: UUID -> textures property
-    const sessionRes = await fetch(
-      `https://sessionserver.mojang.com/session/minecraft/profile/${profile.id}`,
-      { signal: AbortSignal.timeout(5000) }
-    );
-    if (!sessionRes.ok) {
-      return res.status(404).json({ error: "Could not fetch skin profile." });
-    }
-    const session = (await sessionRes.json()) as {
-      properties?: { name: string; value: string }[];
-    };
-    const texProp = session.properties?.find((p) => p.name === "textures");
-    if (!texProp) {
-      return res.status(404).json({ error: "No skin texture found for this user." });
-    }
-
-    const texData = JSON.parse(Buffer.from(texProp.value, "base64").toString("utf8")) as {
-      textures?: { SKIN?: { url?: string; metadata?: { model?: string } } };
-    };
-    const skin = texData.textures?.SKIN;
-    if (!skin?.url) {
-      return res.status(404).json({ error: "No skin texture found for this user." });
-    }
-
-    const model = skin.metadata?.model === "slim" ? "slim" : "classic";
-    skinCache.set(username.toLowerCase(), {
-      skinUrl: skin.url,
-      model,
-      expires: Date.now() + SKIN_CACHE_TTL,
-    });
-    res.json({ skinUrl: skin.url, model });
-  } catch (err) {
-    console.error("[skin-proxy]", err);
-    res.status(502).json({ error: "Failed to reach Mojang services. Try again shortly." });
-  }
-});
-
 // --- YouTube live-stream proxy (ambient screen video) ---
 // yt-dlp resolves the stream URL; we proxy the HLS master playlist and its
 // segments/variants through this server so the browser stays same-origin.
@@ -459,6 +394,23 @@ io.on("connection", (socket) => {
       senderId: "system",
       senderName: "System",
       text: `Now selected: ${result.title}`,
+      timestamp: Date.now(),
+      kind: "system",
+    });
+  });
+
+  // Theatre light lever — any player in the room can flip it.
+  socket.on("lights:toggle", () => {
+    if (!rateLimit(`lights:${socket.id}`, 2, 1_000)) return;
+    const result = manager.toggleLights(socket.id);
+    if (!result.ok) return;
+    io.to(result.roomId).emit("lights:state", { lightsOn: result.lightsOn });
+    io.to(result.roomId).emit("chat:message", {
+      id: `sys-${Date.now()}`,
+      roomId: result.roomId,
+      senderId: "system",
+      senderName: "System",
+      text: result.lightsOn ? "The lights come back on." : "The lights go down.",
       timestamp: Date.now(),
       kind: "system",
     });

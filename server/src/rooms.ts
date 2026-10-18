@@ -71,38 +71,10 @@ function sanitizeAppearance(a: Partial<Appearance> | undefined): Appearance {
   const safeColor = (c: unknown, fallback: string): string =>
     typeof c === "string" && /^#[0-9a-fA-F]{6}$/.test(c) ? c : fallback;
 
-  // Skin URL must be on Mojang's texture CDN (or empty). Mojang sometimes
-  // returns http:// — normalize to https, which the CDN also serves.
-  let skinUrl: string | undefined;
-  if (typeof a?.skinUrl === "string") {
-    try {
-      const u = new URL(a.skinUrl);
-      if ((u.protocol === "https:" || u.protocol === "http:") && u.hostname === "textures.minecraft.net") {
-        u.protocol = "https:";
-        skinUrl = u.toString();
-      }
-    } catch {
-      /* invalid URL — ignore */
-    }
-  }
-
-  // Custom skin must be a small base64 PNG data-URL.
-  let skinData: string | undefined;
-  if (typeof a?.skinData === "string" && a.skinData.length <= 120_000) {
-    if (/^data:image\/png;base64,/.test(a.skinData)) {
-      skinData = a.skinData;
-    }
-  }
-
-  const model = a?.model === "slim" ? "slim" : "classic";
-
   return {
     bodyColor: safeColor(a?.bodyColor, "#4f8f4f"),
     headColor: safeColor(a?.headColor, "#e8c39e"),
     accentColor: safeColor(a?.accentColor, "#2f5f9f"),
-    skinUrl,
-    skinData,
-    model,
   };
 }
 
@@ -128,6 +100,7 @@ interface Room {
   hostId: string;
   players: Map<string, PlayerState>;
   playback: PlaybackState;
+  lightsOn: boolean;
   chat: ChatMessage[];
   createdAt: number;
 }
@@ -181,6 +154,7 @@ export class RoomManager {
         revision: 0,
       },
       chat: [],
+      lightsOn: true,
       createdAt: now,
     };
 
@@ -425,6 +399,18 @@ export class RoomManager {
     }
   }
 
+  /** Flip the theatre lights. Any player in the room can use the lever. */
+  toggleLights(
+    socketId: string
+  ): { ok: true; roomId: string; lightsOn: boolean } | { ok: false; error: string } {
+    const roomId = this.playerRoom.get(socketId);
+    if (!roomId) return { ok: false, error: "You are not in a room." };
+    const room = this.rooms.get(roomId);
+    if (!room) return { ok: false, error: "Room not found." };
+    room.lightsOn = !room.lightsOn;
+    return { ok: true, roomId, lightsOn: room.lightsOn };
+  }
+
   getRoomState(socketId: string): RoomState | null {
     const roomId = this.playerRoom.get(socketId);
     if (!roomId) return null;
@@ -482,6 +468,7 @@ export class RoomManager {
       players: [...room.players.values()],
       hostId: room.hostId,
       playback: { ...room.playback },
+      lightsOn: room.lightsOn,
       serverTime: Date.now(),
     };
   }
