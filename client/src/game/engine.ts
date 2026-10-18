@@ -65,10 +65,12 @@ export class Game {
   private fpHandPhase = 0;
   private fpPunchT = -1;
 
-  // Theatre light state (lever near the entrance).
+  // Theatre light state (lever beside the screen, inside the theatre).
   private lampLights: THREE.PointLight[] = [];
   private cinemaLight: THREE.PointLight | null = null;
   private glowstoneMat: THREE.MeshLambertMaterial | null = null;
+  private hemi: THREE.HemisphereLight | null = null;
+  private sun: THREE.DirectionalLight | null = null;
   private leverHandle: THREE.Mesh | null = null;
   private leverSpot: { x: number; y: number; z: number } | null = null;
 
@@ -103,6 +105,8 @@ export class Game {
     this.lampLights = world.lampLights;
     this.cinemaLight = world.cinemaLight;
     this.glowstoneMat = world.glowstoneMat;
+    this.hemi = world.hemi;
+    this.sun = world.sun;
     this.leverHandle = world.leverHandle;
     this.leverSpot = world.leverSpot;
 
@@ -335,11 +339,20 @@ export class Game {
     return dot >= 0.7;
   }
 
-  /** Apply light state locally (called on join and on every lights:state). */
+  /**
+   * Apply light state locally (called on join and on every lights:state).
+   * Lights off = "movie starting" darkness: the hemisphere sky/ground fill
+   * (the main reason the room stayed bright) drops to a faint glow, the
+   * warm interior light and path lamps go out, and the glowstone stops
+   * emitting — the roof already shadows the sun out, so the interior ends
+   * up barely visible while the outdoor world stays daylit.
+   */
   setLights(on: boolean) {
-    for (const l of this.lampLights) l.intensity = on ? 0.6 : 0.03;
-    if (this.cinemaLight) this.cinemaLight.intensity = on ? 0.6 : 0.08;
-    if (this.glowstoneMat) this.glowstoneMat.emissiveIntensity = on ? 0.6 : 0.04;
+    for (const l of this.lampLights) l.intensity = on ? 0.6 : 0.0;
+    if (this.cinemaLight) this.cinemaLight.intensity = on ? 0.9 : 0.06;
+    if (this.glowstoneMat) this.glowstoneMat.emissiveIntensity = on ? 0.6 : 0.02;
+    if (this.hemi) this.hemi.intensity = on ? 0.85 : 0.1;
+    if (this.sun) this.sun.intensity = on ? 0.75 : 0.55;
     if (this.leverHandle) this.leverHandle.rotation.x = on ? -0.6 : 0.7;
   }
 

@@ -47,7 +47,11 @@ export interface WorldResult {
   cinemaLight: THREE.PointLight;
   /** Shared glowstone material (emissive dims with the lamps). */
   glowstoneMat: THREE.MeshLambertMaterial;
-  /** Pivoting lever handle mesh near the entrance. */
+  /** Sky/ground fill light — killing its intensity is what darkens the room. */
+  hemi: THREE.HemisphereLight;
+  /** Sun (shadow-casting; the roof already keeps most of it out inside). */
+  sun: THREE.DirectionalLight;
+  /** Pivoting lever handle mesh beside the screen. */
   leverHandle: THREE.Mesh;
   /** Interaction point for the lever (E while looking at it). */
   leverSpot: { x: number; y: number; z: number };
@@ -237,9 +241,10 @@ export function buildWorld(): WorldResult {
     lampLights.push(light);
   }
 
-  // --- Theatre light lever: wooden post just outside the entrance (right) ---
-  const leverX = 2.5;
-  const leverZ = -5.5;
+  // --- Theatre light lever: inside the theatre, against the back wall just
+  // LEFT of the screen (screen frame spans x ±7.5 — lever sits at x -8.5).
+  const leverX = -8.5;
+  const leverZ = -25.0;
   const leverPost = block(0.4, 1.8, 0.4, mats.logSide);
   leverPost.position.set(leverX, 0.9, leverZ);
   group.add(leverPost);
@@ -341,6 +346,8 @@ export function buildWorld(): WorldResult {
     lampLights,
     cinemaLight,
     glowstoneMat: mats.glowstone,
+    hemi,
+    sun: dir,
     leverHandle,
     leverSpot: { x: leverX, y: 1.5, z: leverZ },
   };

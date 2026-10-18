@@ -77,20 +77,20 @@ export function createCharacter(name: string, skin: SkinData): VoxelCharacter {
   let parts = buildSkinnedParts(skin);
 
   // Wrap limb meshes in pivot Groups so rotation is at the shoulder/hip.
-  // Head pivots at the neck (y1.5) and the body at the hip (y0.75) so a
-  // crouch lean reads as a torso bend instead of swinging the whole mesh
-  // around the feet.
-  const head = new THREE.Group();
-  head.position.y = 1.5;
-  parts.head.position.y = 0.25;
-  head.add(parts.head);
-  root.add(head);
-
+  // The head is a CHILD of the torso holder (pivot at the hip, y0.75) so a
+  // crouch lean carries head + torso as one connected unit — no floating
+  // neck gap.
   const bodyHolder = new THREE.Group();
   bodyHolder.position.y = 0.75;
   parts.body.position.y = 0.375;
   bodyHolder.add(parts.body);
   root.add(bodyHolder);
+
+  const head = new THREE.Group();
+  head.position.y = 0.75; // neck sits at world y1.5 (bodyHolder origin is 0.75)
+  parts.head.position.y = 0.25;
+  head.add(parts.head);
+  bodyHolder.add(head);
 
   const rightArm = new THREE.Group();
   rightArm.add(parts.rightArm);
@@ -172,13 +172,15 @@ export function createCharacter(name: string, skin: SkinData): VoxelCharacter {
       parts = buildSkinnedParts(newSkin);
       currentSkin = newSkin;
 
-      // Swap meshes inside their holders/groups (pivots live on the holders).
+      // Swap meshes inside their holders/groups (pivots live on the holders;
+      // bodyHolder.clear() also detaches the head group, so re-add it).
       head.clear();
       parts.head.position.y = 0.25;
       head.add(parts.head);
       bodyHolder.clear();
       parts.body.position.y = 0.375;
       bodyHolder.add(parts.body);
+      bodyHolder.add(head);
 
       parts.rightArm.position.set(0, 0, 0);
       rightArm.clear();
@@ -243,11 +245,11 @@ export function createCharacter(name: string, skin: SkinData): VoxelCharacter {
       }
 
       if (crouching) {
-        // Sneak: whole torso leans forward (hip pivot), head follows a
-        // little, legs stay nearly straight with a tiny shuffle, arms hang
-        // forward with the lean.
-        leanTo(0.55);
-        head.rotation.x += (0.25 - head.rotation.x) * Math.min(1, dt * 12);
+        // Sneak: torso + head lean forward together as one unit (head is
+        // parented to the torso pivot), with a small extra head bow. Legs
+        // stay nearly straight with a tiny shuffle; arms hang with the lean.
+        leanTo(0.5);
+        head.rotation.x += (0.15 - head.rotation.x) * Math.min(1, dt * 12);
         const s = moving ? Math.sin(phase) * 0.12 : 0;
         if (moving) phase += dt * 6;
         leftLeg.rotation.x = -0.12 + s;
