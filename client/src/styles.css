@@ -1,0 +1,815 @@
+/* ============================================================
+   CineVox — Minecraft-style UI
+   Pixel fonts, hard drop shadows, dirt/stone textures, bevels.
+   ============================================================ */
+
+@import url("https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&display=swap");
+
+:root {
+  --mc-font: "Press Start 2P", monospace;
+  --mc-font-body: "VT323", monospace;
+  --mc-text: #ffffff;
+  --mc-shadow: #3f3f3f;
+  --mc-panel-bg: rgba(0, 0, 0, 0.65);
+  --mc-panel-border: #000000;
+  --mc-btn-top: #6f6f6f;
+  --mc-btn-mid: #5a5a5a;
+  --mc-btn-bot: #4a4a4a;
+  --mc-btn-border-light: #9a9a9a;
+  --mc-btn-border-dark: #2a2a2a;
+  --mc-btn-hover-top: #7a8fc0;
+  --mc-btn-hover-mid: #5a70a8;
+  --mc-btn-hover-bot: #4a5f90;
+  --mc-accent: #55ff55;
+  --mc-gold: #ffaa00;
+  --mc-red: #ff5555;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: #0b1020;
+  color: var(--mc-text);
+  overflow: hidden;
+  font-family: var(--mc-font-body);
+}
+
+.app-root {
+  position: fixed;
+  inset: 0;
+}
+
+canvas.game-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  image-rendering: pixelated;
+}
+
+/* ---------- Shared Minecraft text shadow ---------- */
+.mc-title,
+.mc-panel-title,
+.mc-btn,
+.mc-label,
+.mc-room-badge,
+.mc-hints,
+.mc-interact-prompt,
+.mc-theater,
+.mc-tab-list,
+.mc-chat-line,
+.mc-modal-title,
+.mc-error,
+.mc-toast,
+.mc-player-count {
+  text-shadow: 2px 2px 0 var(--mc-shadow);
+}
+
+/* ---------- Buttons ---------- */
+.mc-btn {
+  font-family: var(--mc-font);
+  font-size: 11px;
+  color: var(--mc-text);
+  background: linear-gradient(
+    to bottom,
+    var(--mc-btn-top) 0%,
+    var(--mc-btn-mid) 50%,
+    var(--mc-btn-bot) 100%
+  );
+  border: 2px solid;
+  border-color: var(--mc-btn-border-light) var(--mc-btn-border-dark) var(--mc-btn-border-dark)
+    var(--mc-btn-border-light);
+  padding: 10px 18px;
+  cursor: pointer;
+  text-shadow: 2px 2px 0 var(--mc-shadow);
+  transition: filter 0.08s;
+}
+.mc-btn:hover:not(:disabled) {
+  background: linear-gradient(
+    to bottom,
+    var(--mc-btn-hover-top) 0%,
+    var(--mc-btn-hover-mid) 50%,
+    var(--mc-btn-hover-bot) 100%
+  );
+}
+.mc-btn:active:not(:disabled) {
+  border-color: var(--mc-btn-border-dark) var(--mc-btn-border-light) var(--mc-btn-border-light)
+    var(--mc-btn-border-dark);
+  transform: translateY(1px);
+}
+.mc-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.mc-btn-primary {
+  background: linear-gradient(to bottom, #5a8f4a 0%, #4a7a3a 50%, #3a6a2a 100%);
+}
+.mc-btn-primary:hover:not(:disabled) {
+  background: linear-gradient(to bottom, #6aaa5a 0%, #5a9a4a 50%, #4a8a3a 100%);
+}
+.mc-btn-danger {
+  background: linear-gradient(to bottom, #8f4a4a 0%, #7a3a3a 50%, #6a2a2a 100%);
+}
+.mc-btn-danger:hover:not(:disabled) {
+  background: linear-gradient(to bottom, #aa5a5a 0%, #9a4a4a 50%, #8a3a3a 100%);
+}
+.mc-btn-small {
+  font-size: 9px;
+  padding: 7px 12px;
+}
+.mc-btn-skin {
+  white-space: nowrap;
+}
+.mc-btn-micro {
+  font-family: var(--mc-font-body);
+  font-size: 14px;
+  color: var(--mc-text);
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  padding: 2px 8px;
+  cursor: pointer;
+  text-shadow: 1px 1px 0 var(--mc-shadow);
+  margin-left: 8px;
+}
+.mc-btn-micro:hover {
+  background: rgba(255, 255, 255, 0.22);
+}
+
+/* ---------- Inputs ---------- */
+.mc-input {
+  width: 100%;
+  font-family: var(--mc-font-body);
+  font-size: 20px;
+  color: var(--mc-text);
+  background: #000000;
+  border: 2px solid;
+  border-color: var(--mc-btn-border-dark) var(--mc-btn-border-light) var(--mc-btn-border-light)
+    var(--mc-btn-border-dark);
+  padding: 8px 10px;
+  outline: none;
+}
+.mc-input:focus {
+  border-color: var(--mc-accent) var(--mc-btn-border-light) var(--mc-btn-border-light) var(--mc-accent);
+}
+.mc-code-input {
+  letter-spacing: 6px;
+  text-transform: uppercase;
+  text-align: center;
+  font-size: 24px;
+}
+select.mc-input {
+  cursor: pointer;
+}
+
+/* ---------- Landing ---------- */
+.mc-landing {
+  position: fixed;
+  inset: 0;
+  overflow-y: auto;
+  display: flex;
+  justify-content: center;
+}
+.mc-dirt-bg {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  background-color: #6b4a2f;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16'%3E%3Crect width='16' height='16' fill='%236b4a2f'/%3E%3Crect x='0' y='0' width='4' height='4' fill='%237a563c' opacity='0.5'/%3E%3Crect x='8' y='4' width='4' height='4' fill='%235e4029' opacity='0.5'/%3E%3Crect x='4' y='10' width='4' height='4' fill='%237a563c' opacity='0.4'/%3E%3Crect x='12' y='12' width='4' height='4' fill='%235e4029' opacity='0.5'/%3E%3C/svg%3E");
+  background-size: 32px 32px;
+  image-rendering: pixelated;
+  opacity: 1;
+}
+.mc-dirt-bg::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+}
+.mc-landing-inner {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  padding: 32px 16px;
+  width: min(520px, 100%);
+}
+.mc-title {
+  font-family: var(--mc-font);
+  font-size: clamp(24px, 5vw, 40px);
+  margin: 12px 0 0;
+  color: var(--mc-text);
+  text-shadow: 3px 3px 0 #000;
+}
+.mc-title span {
+  color: var(--mc-accent);
+}
+.mc-tagline {
+  font-family: var(--mc-font-body);
+  font-size: 22px;
+  color: #d0d0d0;
+  margin: 0 0 8px;
+  text-shadow: 2px 2px 0 #000;
+}
+
+.mc-panel {
+  width: 100%;
+  background: var(--mc-panel-bg);
+  border: 2px solid var(--mc-panel-border);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08), 0 4px 0 rgba(0, 0, 0, 0.5);
+  padding: 16px 18px;
+}
+.mc-panel-title {
+  font-family: var(--mc-font);
+  font-size: 12px;
+  margin-bottom: 12px;
+  color: var(--mc-gold);
+}
+.mc-label {
+  display: block;
+  font-family: var(--mc-font-body);
+  font-size: 18px;
+  color: #c0c0c0;
+  margin: 10px 0 4px;
+}
+.mc-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.mc-row > .mc-input {
+  flex: 1;
+}
+.mc-skin-preview {
+  display: block;
+  margin: 12px auto 0;
+  image-rendering: pixelated;
+  background: rgba(0, 0, 0, 0.3);
+  border: 2px solid #000;
+}
+.mc-skin-ok {
+  color: var(--mc-accent);
+  font-family: var(--mc-font-body);
+  font-size: 18px;
+}
+
+.mc-room-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+.mc-room-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 12px;
+  cursor: pointer;
+  background: rgba(255, 255, 255, 0.06);
+  border: 2px solid transparent;
+}
+.mc-room-item:hover {
+  border-color: var(--mc-accent);
+  background: rgba(255, 255, 255, 0.1);
+}
+.mc-room-name {
+  font-family: var(--mc-font-body);
+  font-size: 20px;
+  font-weight: bold;
+}
+.mc-room-meta {
+  font-family: var(--mc-font-body);
+  font-size: 16px;
+  color: #a0a0a0;
+}
+.mc-room-code {
+  font-family: var(--mc-font);
+  font-size: 12px;
+  color: var(--mc-gold);
+}
+
+.mc-error {
+  color: var(--mc-red);
+  font-family: var(--mc-font-body);
+  font-size: 18px;
+  min-height: 22px;
+}
+
+/* ---------- HUD ---------- */
+.mc-hud {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+}
+.mc-hud > * {
+  pointer-events: auto;
+}
+
+.mc-hud-topleft {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+}
+.mc-room-badge {
+  background: var(--mc-panel-bg);
+  border: 2px solid #000;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+  padding: 8px 12px;
+  font-family: var(--mc-font-body);
+}
+.mc-room-badge-name {
+  font-size: 20px;
+  color: var(--mc-gold);
+}
+.mc-room-badge-code {
+  display: flex;
+  align-items: center;
+  font-family: var(--mc-font);
+  font-size: 14px;
+  letter-spacing: 2px;
+  color: var(--mc-accent);
+  margin-top: 2px;
+}
+
+.mc-hud-topright {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.mc-player-count {
+  font-family: var(--mc-font);
+  font-size: 12px;
+  background: var(--mc-panel-bg);
+  border: 2px solid #000;
+  padding: 8px 12px;
+}
+
+/* Crosshair */
+.mc-crosshair {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  z-index: 10;
+}
+.mc-crosshair-h,
+.mc-crosshair-v {
+  position: absolute;
+  background: rgba(255, 255, 255, 0.85);
+  mix-blend-mode: difference;
+}
+.mc-crosshair-h {
+  width: 18px;
+  height: 2px;
+  top: -1px;
+  left: -9px;
+}
+.mc-crosshair-v {
+  width: 2px;
+  height: 18px;
+  top: -9px;
+  left: -1px;
+}
+
+/* Hints */
+.mc-hints {
+  position: absolute;
+  bottom: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 12px;
+  font-family: var(--mc-font-body);
+  font-size: 17px;
+  color: #c0c0c0;
+  background: var(--mc-panel-bg);
+  border: 2px solid #000;
+  padding: 6px 14px;
+  white-space: nowrap;
+}
+.mc-hints kbd {
+  font-family: var(--mc-font);
+  font-size: 9px;
+  background: rgba(255, 255, 255, 0.15);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  padding: 2px 5px;
+  color: #fff;
+}
+
+/* Interaction prompt */
+.mc-interact-prompt {
+  position: absolute;
+  left: 50%;
+  top: 55%;
+  transform: translateX(-50%);
+  font-family: var(--mc-font);
+  font-size: 13px;
+  color: var(--mc-accent);
+  background: var(--mc-panel-bg);
+  border: 2px solid #000;
+  padding: 10px 18px;
+  animation: mc-pulse 1.6s ease-in-out infinite;
+}
+@keyframes mc-pulse {
+  0%,
+  100% {
+    opacity: 0.85;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+/* ---------- Chat (Minecraft overlay style) ---------- */
+.mc-chat {
+  position: absolute;
+  left: 10px;
+  bottom: 44px;
+  width: min(480px, 60vw);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.mc-chat-toggle {
+  position: absolute;
+  top: -26px;
+  right: 0;
+  background: rgba(0, 0, 0, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  color: #ccc;
+  font-family: var(--mc-font-body);
+  font-size: 16px;
+  cursor: pointer;
+  padding: 1px 7px;
+  z-index: 2;
+}
+.mc-chat-hidden-btn {
+  position: absolute;
+  left: 10px;
+  bottom: 44px;
+  top: auto;
+  right: auto;
+  font-size: 20px;
+  padding: 4px 10px;
+}
+.mc-chat-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.mc-chat-line {
+  font-family: var(--mc-font-body);
+  font-size: 19px;
+  line-height: 1.25;
+  color: #ffffff;
+  background: rgba(0, 0, 0, 0.5);
+  padding: 2px 8px;
+  width: fit-content;
+  max-width: 100%;
+  word-break: break-word;
+}
+.mc-chat-line.system {
+  color: #ffff55;
+}
+.mc-chat-sender {
+  color: #55ff55;
+}
+.mc-chat-time {
+  color: #888;
+  font-size: 14px;
+  margin-left: 6px;
+}
+.mc-chat-input-row {
+  margin-top: 2px;
+}
+.mc-chat-input {
+  width: 100%;
+  font-family: var(--mc-font-body);
+  font-size: 20px;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.75);
+  border: 2px solid #000;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.15);
+  padding: 6px 10px;
+  outline: none;
+}
+.mc-chat-hint {
+  font-family: var(--mc-font-body);
+  font-size: 15px;
+  color: rgba(255, 255, 255, 0.45);
+  padding-left: 4px;
+}
+
+/* ---------- Tab player list (Minecraft multiplayer) ---------- */
+.mc-tab-list {
+  position: fixed;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  min-width: 320px;
+  background: rgba(0, 0, 0, 0.7);
+  border: 2px solid #000;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1);
+  padding: 12px 18px;
+  z-index: 40;
+}
+.mc-tab-list-title {
+  font-family: var(--mc-font);
+  font-size: 11px;
+  color: var(--mc-gold);
+  text-align: center;
+  margin-bottom: 10px;
+}
+.mc-tab-list-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.mc-tab-list-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--mc-font-body);
+  font-size: 20px;
+  color: #fff;
+  padding: 3px 6px;
+  background: rgba(255, 255, 255, 0.04);
+}
+.mc-tab-skin-chip {
+  width: 14px;
+  height: 14px;
+  border: 1px solid #000;
+  image-rendering: pixelated;
+}
+.mc-tab-host {
+  font-family: var(--mc-font);
+  font-size: 8px;
+  color: var(--mc-gold);
+  border: 1px solid var(--mc-gold);
+  padding: 1px 4px;
+  margin-left: auto;
+}
+.mc-tab-speaking {
+  color: var(--mc-accent);
+  margin-left: 4px;
+}
+
+/* ---------- Theater controls ---------- */
+.mc-theater {
+  position: absolute;
+  bottom: 50px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(560px, 90vw);
+  background: var(--mc-panel-bg);
+  border: 2px solid #000;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+  padding: 10px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.mc-theater-title {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-family: var(--mc-font);
+  font-size: 11px;
+}
+.mc-theater-hint {
+  font-family: var(--mc-font-body);
+  font-size: 16px;
+  color: #aaa;
+}
+.mc-theater-progress {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-family: var(--mc-font-body);
+  font-size: 17px;
+  color: #ccc;
+}
+.mc-theater-progress input[type="range"] {
+  flex: 1;
+  accent-color: var(--mc-accent);
+}
+.mc-theater-buttons {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+}
+.mc-theater-note {
+  font-family: var(--mc-font-body);
+  font-size: 15px;
+  color: #999;
+  text-align: center;
+}
+
+/* ---------- Modals ---------- */
+.mc-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 50;
+}
+.mc-modal {
+  width: min(720px, 94vw);
+  max-height: 86vh;
+  overflow-y: auto;
+  background: var(--mc-panel-bg);
+  border: 2px solid #000;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1), 0 8px 0 rgba(0, 0, 0, 0.5);
+  padding: 18px 22px;
+}
+.mc-modal-title {
+  font-family: var(--mc-font);
+  font-size: 14px;
+  color: var(--mc-gold);
+  margin-bottom: 8px;
+}
+.mc-modal-note {
+  font-family: var(--mc-font-body);
+  font-size: 17px;
+  color: #b0b0b0;
+  margin-bottom: 6px;
+}
+.mc-modal-empty {
+  font-family: var(--mc-font-body);
+  font-size: 20px;
+  color: #888;
+  padding: 24px;
+  text-align: center;
+}
+.mc-video-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 10px;
+  margin-top: 10px;
+}
+.mc-video-card {
+  border: 2px solid #000;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.05);
+  cursor: pointer;
+  transition: background 0.1s;
+}
+.mc-video-card:hover:not(.disabled) {
+  background: rgba(90, 140, 220, 0.25);
+}
+.mc-video-card.disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.mc-video-thumb {
+  height: 84px;
+  background: linear-gradient(135deg, #1c2540, #2a1840);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--mc-font);
+  font-size: 22px;
+  color: var(--mc-gold);
+}
+.mc-video-info {
+  padding: 6px 8px;
+}
+.mc-video-title {
+  font-family: var(--mc-font-body);
+  font-size: 18px;
+  font-weight: bold;
+}
+.mc-video-sub {
+  font-family: var(--mc-font-body);
+  font-size: 14px;
+  color: #999;
+}
+.mc-modal-actions {
+  margin-top: 14px;
+  text-align: right;
+}
+
+/* ---------- Toast ---------- */
+.mc-toast {
+  position: fixed;
+  top: 60px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-family: var(--mc-font);
+  font-size: 11px;
+  color: #fff;
+  background: rgba(160, 40, 40, 0.92);
+  border: 2px solid #000;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.15);
+  padding: 10px 16px;
+  z-index: 60;
+}
+
+/* ---------- Loading ---------- */
+.loading {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  background: #0b1020;
+  z-index: 100;
+  font-family: var(--mc-font);
+  font-size: 12px;
+  color: var(--mc-accent);
+}
+.spinner {
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  border: 4px solid rgba(255, 255, 255, 0.15);
+  border-top-color: var(--mc-accent);
+  animation: spin 0.9s linear infinite;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ---------- Responsive ---------- */
+@media (max-width: 720px) {
+  .mc-chat {
+    width: calc(100vw - 20px);
+  }
+  .mc-hints {
+    display: none;
+  }
+  .mc-tab-list {
+    min-width: 260px;
+  }
+}
+
+/* ---------- Movie settings (E / left-click at screen) ---------- */
+.mc-settings {
+  width: min(560px, 94vw);
+}
+.mc-settings-nowplaying {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.mc-settings-title {
+  font-family: var(--mc-font-body);
+  font-size: 19px;
+  font-weight: bold;
+}
+.mc-settings-status {
+  font-family: var(--mc-font);
+  font-size: 10px;
+  color: var(--mc-accent);
+  white-space: nowrap;
+}
+.mc-settings-progress {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-family: var(--mc-font-body);
+  font-size: 17px;
+  color: #ccc;
+  margin-bottom: 12px;
+}
+.mc-settings-progress input[type="range"] {
+  flex: 1;
+  accent-color: var(--mc-accent);
+}
+.mc-settings-time {
+  min-width: 42px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.mc-settings-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.mc-settings-volume {
+  font-family: var(--mc-font-body);
+  font-size: 16px;
+  color: #ccc;
+}
+.mc-settings-volume input[type="range"] {
+  flex: 1;
+  accent-color: var(--mc-gold);
+}
