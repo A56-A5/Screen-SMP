@@ -325,7 +325,8 @@ export class RoomManager {
 
   selectVideo(
     socketId: string,
-    videoId: string
+    videoId: string,
+    ytTitle?: string
   ): { ok: true; state: PlaybackState; roomId: string; title: string } | { ok: false; error: string } {
     const roomId = this.playerRoom.get(socketId);
     if (!roomId) return { ok: false, error: "You are not in a room." };
@@ -333,21 +334,40 @@ export class RoomManager {
     if (!room) return { ok: false, error: "Room not found." };
     if (room.hostId !== socketId) return { ok: false, error: "Only the host can change the video." };
 
-    const video = SAMPLE_VIDEOS.find((v) => v.id === videoId);
-    if (!video) return { ok: false, error: "Unknown video." };
+    let id: string;
+    let url: string;
+    let title: string;
+
+    const catalogVideo = SAMPLE_VIDEOS.find((v) => v.id === videoId);
+    if (catalogVideo) {
+      id = catalogVideo.id;
+      url = catalogVideo.url;
+      title = catalogVideo.title;
+    } else if (videoId.startsWith("yt:")) {
+      // YouTube selection: URL is always built server-side from a validated id.
+      const ytId = videoId.slice(3);
+      if (!/^[A-Za-z0-9_-]{11}$/.test(ytId)) {
+        return { ok: false, error: "Invalid YouTube video." };
+      }
+      id = `yt:${ytId}`;
+      url = `/api/youtube/stream?videoId=${ytId}`;
+      title = ytTitle?.trim() || `YouTube · ${ytId}`;
+    } else {
+      return { ok: false, error: "Unknown video." };
+    }
 
     room.playback = {
       status: "paused",
-      videoId: video.id,
-      videoUrl: video.url,
-      title: video.title,
+      videoId: id,
+      videoUrl: url,
+      title,
       position: 0,
       updatedAt: Date.now(),
       hostId: room.hostId,
       revision: room.playback.revision + 1,
     };
-    this.addSystemMessage(room, `Now selected: ${video.title}`);
-    return { ok: true, state: room.playback, roomId, title: video.title };
+    this.addSystemMessage(room, `Now selected: ${title}`);
+    return { ok: true, state: room.playback, roomId, title };
   }
 
   playbackCommand(

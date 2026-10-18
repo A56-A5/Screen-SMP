@@ -431,6 +431,7 @@ export class Game {
 
   // ---------- video screen ----------
   attachVideo(video: HTMLVideoElement) {
+    this.detachVideo(); // dispose the previous texture (source switches)
     this.videoTexture = new THREE.VideoTexture(video);
     this.videoTexture.colorSpace = THREE.SRGBColorSpace;
     const mat = this.screenMesh.material as THREE.MeshBasicMaterial;

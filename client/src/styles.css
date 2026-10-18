@@ -813,3 +813,30 @@ select.mc-input {
   flex: 1;
   accent-color: var(--mc-gold);
 }
+
+/* YouTube picker inside movie settings */
+.mc-settings-yt {
+  border-top: 2px solid #222;
+  border-bottom: 2px solid #222;
+  padding: 10px 0;
+  margin-bottom: 12px;
+}
+.mc-settings-yt-label {
+  font-family: var(--mc-font-body);
+  font-size: 16px;
+  color: var(--mc-gold);
+  margin-bottom: 8px;
+}
+.mc-settings-yt-input {
+  width: auto;
+  flex: 1;
+  min-width: 0;
+  font-size: 16px;
+}
+/* LIVE indicator replacing the scrub bar for live streams */
+.mc-settings-live-bar {
+  flex: 1;
+  height: 10px;
+  background: #b3261e;
+  border: 2px solid #000;
+}

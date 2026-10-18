@@ -1,6 +1,7 @@
 import http from "node:http";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { Readable } from "node:stream";
 import express from "express";
 import { Server } from "socket.io";
 import { RoomManager, SAMPLE_VIDEOS } from "./rooms.js";
@@ -145,17 +146,6 @@ function rewriteManifest(text: string, baseUrl: string): string {
     .join("\n");
 }
 
-/** Decide by content, never by URL: googlevideo paths can *contain* ".m3u8". */
-function isManifestUrl(url: string, contentType: string | null): boolean {
-  const ct = (contentType ?? "").toLowerCase();
-  if (ct) return ct.includes("mpegurl");
-  try {
-    return new URL(url).pathname.endsWith(".m3u8");
-  } catch {
-    return false;
-  }
-}
-
 app.get("/api/youtube/stream", async (req, res) => {
   const videoId = String(req.query.videoId ?? "");
   if (!/^[A-Za-z0-9_-]{5,20}$/.test(videoId)) {
@@ -163,34 +153,58 @@ app.get("/api/youtube/stream", async (req, res) => {
   }
   try {
     const url = await resolveYouTube(videoId);
+    // Sniff with a tiny ranged GET (read first chunk only, then cancel) —
+    // never buffer whole media files: they stream through instead.
+    const sniff = await fetch(url, {
+      headers: { "user-agent": YT_UA, range: "bytes=0-63" },
+      signal: AbortSignal.timeout(20_000),
+    });
+    if (!sniff.ok) throw new Error(`upstream ${sniff.status}`);
+    let first: Uint8Array | undefined;
+    const reader = sniff.body?.getReader();
+    if (reader) {
+      const { value } = await reader.read();
+      first = value;
+      await reader.cancel().catch(() => {});
+    }
+    const isM3u8 = Buffer.from(first ?? new Uint8Array(0))
+      .toString("latin1")
+      .trimStart()
+      .startsWith("#EXTM3U");
+
+    // HEAD (the client's type-sniff): answer from the probe, no full fetch.
+    if (req.method === "HEAD") {
+      const ct = sniff.headers.get("content-type");
+      if (ct) res.setHeader("content-type", ct);
+      const total = sniff.headers.get("content-range")?.split("/")[1];
+      if (total && total !== "*") res.setHeader("content-length", total);
+      return res.end();
+    }
+
+    if (isM3u8) {
+      const full = await fetch(url, { headers: { "user-agent": YT_UA }, signal: AbortSignal.timeout(20_000) });
+      if (!full.ok) throw new Error(`upstream ${full.status}`);
+      const text = await full.text();
+      res.setHeader("content-type", "application/vnd.apple.mpegurl");
+      return res.send(rewriteManifest(text, url));
+    }
+
+    // Direct media file (VOD): stream through with Range passthrough.
     const upstream = await fetch(url, {
       headers: { "user-agent": YT_UA, ...(req.headers.range ? { range: req.headers.range } : {}) },
       signal: AbortSignal.timeout(20_000),
     });
-    if (!upstream.ok) throw new Error(`upstream ${upstream.status}`);
-    const buf = Buffer.from(await upstream.arrayBuffer());
-    if (buf.subarray(0, 16).toString("latin1").trimStart().startsWith("#EXTM3U")) {
-      res.setHeader("content-type", "application/vnd.apple.mpegurl");
-      return res.send(rewriteManifest(buf.toString("utf8"), url));
+    if (!upstream.ok) {
+      res.status(upstream.status);
+      return res.end();
     }
-    // Direct media file (VOD): buffer and honor Range.
-    const range = req.headers.range;
-    if (range) {
-      const m = /^bytes=(\d*)-(\d*)$/.exec(range);
-      const start = m?.[1] ? Number(m[1]) : 0;
-      const end = m?.[2] ? Math.min(Number(m[2]), buf.length - 1) : buf.length - 1;
-      const slice = buf.subarray(start, end + 1);
-      res.status(206);
-      res.setHeader("content-type", upstream.headers.get("content-type") ?? "video/mp4");
-      res.setHeader("content-range", `bytes ${start}-${start + slice.length - 1}/${buf.length}`);
-      res.setHeader("accept-ranges", "bytes");
-      res.setHeader("content-length", String(slice.length));
-      return res.send(slice);
+    res.status(upstream.status);
+    for (const h of ["content-type", "content-length", "content-range", "accept-ranges"]) {
+      const v = upstream.headers.get(h);
+      if (v) res.setHeader(h, v);
     }
-    res.setHeader("content-type", upstream.headers.get("content-type") ?? "video/mp4");
-    res.setHeader("accept-ranges", "bytes");
-    res.setHeader("content-length", String(buf.length));
-    return res.send(buf);
+    if (!upstream.body) return res.end();
+    return Readable.fromWeb(upstream.body as import("node:stream/web").ReadableStream).pipe(res);
   } catch (err) {
     console.error("[youtube-proxy]", err);
     res.status(502).json({ error: "Could not resolve YouTube stream." });
@@ -365,14 +379,36 @@ io.on("connection", (socket) => {
     io.to(result.roomId).emit("chat:message", result.message);
   });
 
-  socket.on("movie:select", (payload: SelectVideoPayload) => {
+  socket.on("movie:select", async (payload: SelectVideoPayload) => {
     if (!rateLimit(`select:${socket.id}`, 10, 30_000)) {
       return emitError(socket, "movie:select", "Too many selections, slow down.");
     }
     if (!payload || typeof payload.videoId !== "string") {
       return emitError(socket, "movie:select", "Invalid payload.");
     }
-    const result = manager.selectVideo(socket.id, payload.videoId);
+    // YouTube: fetch a friendly title via oEmbed (no API key). Invalid ids
+    // get a clear error; network hiccups fall back to a generic title.
+    let ytTitle: string | undefined;
+    if (payload.videoId.startsWith("yt:")) {
+      const ytId = payload.videoId.slice(3);
+      try {
+        const watchUrl = `https://www.youtube.com/watch?v=${ytId}`;
+        const r = await fetch(
+          `https://www.youtube.com/oembed?url=${encodeURIComponent(watchUrl)}&format=json`,
+          { signal: AbortSignal.timeout(5000) }
+        );
+        if (r.status === 400 || r.status === 404 || r.status === 410) {
+          return emitError(socket, "movie:select", "Couldn't find that YouTube video.");
+        }
+        if (r.ok) {
+          const info = (await r.json()) as { title?: string };
+          ytTitle = info.title;
+        }
+      } catch {
+        // timeout / offline — keep going with a fallback title
+      }
+    }
+    const result = manager.selectVideo(socket.id, payload.videoId, ytTitle);
     if (!result.ok) return emitError(socket, "movie:select", result.error);
     io.to(result.roomId).emit("movie:state", { playback: result.state });
     io.to(result.roomId).emit("chat:message", {

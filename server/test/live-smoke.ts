@@ -80,6 +80,8 @@ async function main() {
 
   a.close();
   b.close();
+
+  await ytSelectSmoke();
   console.log("\nAll live multiplayer smoke tests passed.");
   process.exit(0);
 }
@@ -88,3 +90,28 @@ main().catch((e) => {
   console.error("SMOKE TEST FAILED:", e);
   process.exit(1);
 });
+
+/** YouTube selection: host picks yt:<id>, real title comes back, stream resolves. */
+export async function ytSelectSmoke(): Promise<void> {
+  const s = await connect();
+  const joined = new Promise<any>((res) => s.once("room:joined", res));
+  s.emit("room:create", { name: "YTSmoke", visibility: "public", playerName: "Yara", appearance });
+  const state = await joined;
+
+  const movieOnSelf = new Promise<any>((res) => s.once("movie:state", res));
+  s.emit("movie:select", { videoId: "yt:jNQXAC9IVRw" });
+  const sel = await movieOnSelf;
+  assert.equal(sel.playback.videoId, "yt:jNQXAC9IVRw");
+  assert.equal(sel.playback.videoUrl, "/api/youtube/stream?videoId=jNQXAC9IVRw");
+  assert.match(sel.playback.title, /jNQXAC9IVRw|zoo/i, "real title from oEmbed");
+  console.log(`✔ YouTube selected: "${sel.playback.title}"`);
+
+  // Invalid id must be rejected
+  const errP = new Promise<any>((res) => s.once("error:msg", res));
+  s.emit("movie:select", { videoId: "yt:not-a-video!" });
+  const err = await errP;
+  assert.match(err.error, /YouTube/i, "invalid yt id rejected");
+  console.log("✔ invalid YouTube id rejected");
+
+  s.close();
+}

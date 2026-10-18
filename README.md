@@ -14,7 +14,9 @@ sit in seats, chat, and watch open-license movies together with server-synced pl
 | Tests    | `node:test` unit tests + a live two-client socket smoke test |
 
 No database or external API keys are required for the MVP — rooms live in server memory
-and the movie catalog is a built-in list of openly licensed sample videos.
+and the movie catalog is a built-in list of openly licensed sample videos, plus a
+**YouTube option** — paste any YouTube link (VOD or live) in movie settings and it plays on
+the cinema screen for everyone, synced.
 
 ## Quick start
 
@@ -50,7 +52,7 @@ on your network) to see real multiplayer sync.
 3. Friends join via the code, the public-room list, or the copied link.
 4. Controls:
    - **WASD** move · **double-tap W** run · **Shift** crouch (sneak) · **Space** jump · **mouse** look
-   - **E** — look at a chair to **sit**, anywhere else it opens **movie settings** (duration bar, play/pause, seek, captions, volume, switch movie)
+   - **E** — look at a chair to **sit**, anywhere else it opens **movie settings** (paste a **YouTube link**, duration bar, play/pause, seek, captions, volume, switch movie)
    - **Right click** punch (syncs to other players) · **F5** toggle first/third person
    - **T** (or **/**) open chat · **hold Tab** player list · **Escape** release mouse / close panels
    - **/sit** sit on the nearest seat (or stand back up) — stadium rows: back rows are raised

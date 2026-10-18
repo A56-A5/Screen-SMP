@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import type { PlaybackState, SampleVideo } from "../net/types";
+import { parseYouTubeId } from "../net/youtube";
 
 function fmt(sec: number): string {
   if (!Number.isFinite(sec) || sec < 0) return "0:00";
@@ -21,6 +22,7 @@ export function MovieSettings({
   onPause,
   onSeek,
   onSwitchMovie,
+  onPlayYouTube,
   onClose,
   onToast,
 }: {
@@ -32,6 +34,7 @@ export function MovieSettings({
   onPause: () => void;
   onSeek: (pos: number) => void;
   onSwitchMovie: () => void;
+  onPlayYouTube: (videoId: string) => void;
   onClose: () => void;
   onToast: (msg: string) => void;
 }) {
@@ -39,6 +42,7 @@ export function MovieSettings({
   const [tick, setTick] = useState(0);
   const [captionsOn, setCaptionsOn] = useState(false);
   const [volume, setVolume] = useState(() => video?.volume ?? 1);
+  const [ytInput, setYtInput] = useState("");
 
   // Live-updating clock while the panel is open.
   useEffect(() => {
@@ -55,6 +59,9 @@ export function MovieSettings({
   const catalogEntry = playback.videoId ? catalog.find((v) => v.id === playback.videoId) : undefined;
   const duration = Math.max(videoDuration, catalogEntry?.duration ?? 0, elapsed + 1, 60);
   const display = scrubbing ?? elapsed;
+  // HLS live streams report duration === Infinity — show LIVE, no scrubbing.
+  const isLive = video?.duration === Infinity;
+  const ytId = parseYouTubeId(ytInput);
 
   const toggleCaptions = () => {
     if (!video) {
@@ -82,6 +89,41 @@ export function MovieSettings({
       <div className="mc-modal mc-settings" onClick={(e) => e.stopPropagation()}>
         <div className="mc-modal-title">Movie Settings</div>
 
+        {/* YouTube picker */}
+        {isHost && (
+          <div className="mc-settings-yt">
+            <div className="mc-settings-yt-label">Play a YouTube video</div>
+            <div className="mc-settings-row">
+              <input
+                className="mc-input mc-settings-yt-input"
+                placeholder="Paste a YouTube link…"
+                value={ytInput}
+                onChange={(e) => setYtInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && ytId) {
+                    onPlayYouTube(ytId);
+                    setYtInput("");
+                  }
+                }}
+              />
+              <button
+                className="mc-btn mc-btn-small mc-btn-primary"
+                disabled={!ytId}
+                onClick={() => {
+                  if (!ytId) return;
+                  onPlayYouTube(ytId);
+                  setYtInput("");
+                }}
+              >
+                Play
+              </button>
+            </div>
+            {ytInput.trim() && !ytId && (
+              <div className="mc-modal-note">That doesn't look like a YouTube link.</div>
+            )}
+          </div>
+        )}
+
         {playback.videoUrl ? (
           <>
             <div className="mc-settings-nowplaying">
@@ -92,6 +134,13 @@ export function MovieSettings({
             </div>
 
             {/* Duration bar */}
+            {isLive ? (
+              <div className="mc-settings-progress">
+                <span className="mc-settings-time">LIVE</span>
+                <div className="mc-settings-live-bar" />
+                <span className="mc-settings-time">●</span>
+              </div>
+            ) : (
             <div className="mc-settings-progress">
               <span className="mc-settings-time">{fmt(display)}</span>
               <input
@@ -107,6 +156,7 @@ export function MovieSettings({
               />
               <span className="mc-settings-time">{fmt(duration)}</span>
             </div>
+            )}
 
             {/* Playback transport */}
             <div className="mc-settings-row">
@@ -119,12 +169,16 @@ export function MovieSettings({
                   Play
                 </button>
               )}
-              <button className="mc-btn mc-btn-small" disabled={!isHost} onClick={() => onSeek(Math.max(0, display - 10))}>
-                -10s
-              </button>
-              <button className="mc-btn mc-btn-small" disabled={!isHost} onClick={() => onSeek(display + 10)}>
-                +10s
-              </button>
+              {!isLive && (
+                <button className="mc-btn mc-btn-small" disabled={!isHost} onClick={() => onSeek(Math.max(0, display - 10))}>
+                  -10s
+                </button>
+              )}
+              {!isLive && (
+                <button className="mc-btn mc-btn-small" disabled={!isHost} onClick={() => onSeek(display + 10)}>
+                  +10s
+                </button>
+              )}
               <button className="mc-btn mc-btn-small" onClick={toggleCaptions}>
                 CC {captionsOn ? "On" : "Off"}
               </button>

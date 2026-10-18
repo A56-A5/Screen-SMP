@@ -13,6 +13,7 @@ import {
   seekMovie,
 } from "../net/socket";
 import type { ChatMessage, PlaybackState, RoomState, SampleVideo, PlayerState } from "../net/types";
+import { isYouTubeSource } from "../net/youtube";
 import { ChatPanel } from "./ChatPanel";
 import { MovieBrowser } from "./MovieBrowser";
 import { MovieSettings } from "./MovieSettings";
@@ -48,6 +49,8 @@ export function RoomView({
   const [catalog, setCatalog] = useState<SampleVideo[]>([]);
   const [showTabList, setShowTabList] = useState(false);
   const [firstPerson, setFirstPerson] = useState(true);
+  // YT pick = "watch now": auto-press play once the selection round-trips.
+  const [pendingAutoPlay, setPendingAutoPlay] = useState<string | null>(null);
 
   const isHost = myId === room.hostId;
 
@@ -146,53 +149,83 @@ export function RoomView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [myId]);
 
-  // Attach video element to 3D screen. When no movie is selected, the screen
-  // always plays a test YouTube live stream (muted ambient, local-only).
-  // Live streams are HLS → played via hls.js (Chrome has no native HLS).
+  // Attach video element to 3D screen.
+  // - No movie selected: ambient test live stream (muted, looping, local).
+  // - YouTube selection: live → HLS via hls.js, VOD → proxied mp4 via <video>.
+  // - Catalog movie: plain proxied URL (unchanged).
   useEffect(() => {
     const v = videoRef.current;
     const g = gameRef.current;
     if (!v || !g) return;
     hlsRef.current?.destroy();
     hlsRef.current = null;
-    if (playback.videoUrl) {
-      v.src = playback.videoUrl;
+    let cancelled = false;
+
+    const attachHls = (src: string) => {
+      v.removeAttribute("src");
+      v.load();
+      const hls = new Hls({ enableWorker: true });
+      hls.loadSource(src);
+      hls.attachMedia(v);
+      hls.on(Hls.Events.ERROR, (_evt, data) => {
+        if (data.fatal) console.warn("[ambient-hls]", data.details);
+      });
+      hlsRef.current = hls;
+    };
+
+    const setup = async () => {
+      const url = playback.videoUrl;
+      if (!url) {
+        const src = `/api/youtube/stream?videoId=${TEST_YT_VIDEO_ID}`;
+        v.loop = true;
+        v.muted = true;
+        if (Hls.isSupported()) attachHls(src);
+        else v.src = src; // Safari: native HLS
+        v.play().catch(() => {});
+        return;
+      }
       v.loop = false;
       v.muted = false;
-    } else {
-      const src = `/api/youtube/stream?videoId=${TEST_YT_VIDEO_ID}`;
-      v.loop = true;
-      v.muted = true;
-      if (Hls.isSupported()) {
-        v.removeAttribute("src");
-        v.load();
-        const hls = new Hls({ enableWorker: true });
-        hls.loadSource(src);
-        hls.attachMedia(v);
-        hls.on(Hls.Events.ERROR, (_evt, data) => {
-          if (data.fatal) console.warn("[ambient-hls]", data.details);
-        });
-        hlsRef.current = hls;
+      if (isYouTubeSource(url)) {
+        try {
+          const head = await fetch(url, { method: "HEAD" });
+          if (cancelled) return;
+          const ct = head.headers.get("content-type") ?? "";
+          if (ct.includes("mpegurl") && Hls.isSupported()) {
+            attachHls(url);
+          } else {
+            v.src = url; // VOD: direct media through the proxy
+          }
+        } catch {
+          if (!cancelled) v.src = url;
+        }
       } else {
-        v.src = src; // Safari: native HLS
+        v.src = url;
       }
-      v.play().catch(() => {});
-    }
+      // Play/pause is governed by the sync effect below.
+    };
+
+    setup();
     g.attachVideo(v);
     return () => {
+      cancelled = true;
       hlsRef.current?.destroy();
       hlsRef.current = null;
     };
   }, [playback.videoUrl]);
 
-  // Playback sync
+  // Playback sync. Live streams (duration === Infinity) only follow
+  // play/pause — their position can't be meaningfully time-corrected.
   useEffect(() => {
     const v = videoRef.current;
     if (!v || !playback.videoUrl) return;
-    const elapsed = playback.status === "playing" ? (Date.now() - playback.updatedAt) / 1000 : 0;
-    const expected = playback.position + elapsed;
-    if (Math.abs(v.currentTime - expected) > 1.5) {
-      v.currentTime = expected;
+    const live = v.duration === Infinity;
+    if (!live && v.readyState >= 1) {
+      const elapsed = playback.status === "playing" ? (Date.now() - playback.updatedAt) / 1000 : 0;
+      const expected = playback.position + elapsed;
+      if (Math.abs(v.currentTime - expected) > 1.5) {
+        v.currentTime = expected;
+      }
     }
     if (playback.status === "playing" && v.paused) {
       v.play().catch(() => {});
@@ -200,6 +233,21 @@ export function RoomView({
       v.pause();
     }
   }, [playback]);
+
+  // Auto-play after a YouTube pick: once the server confirms the selection
+  // (status "paused" + matching id), press play for everyone.
+  useEffect(() => {
+    if (!pendingAutoPlay) return;
+    if (playback.videoId === pendingAutoPlay && playback.videoUrl && playback.status === "paused") {
+      setPendingAutoPlay(null);
+      playMovie();
+    }
+  }, [pendingAutoPlay, playback]);
+
+  const handlePlayYouTube = useCallback((ytId: string) => {
+    selectVideo(`yt:${ytId}`);
+    setPendingAutoPlay(`yt:${ytId}`);
+  }, []);
 
   // Speaking indicator via mic level
   useEffect(() => {
@@ -454,6 +502,7 @@ export function RoomView({
             setShowSettings(false);
             setShowBrowser(true);
           }}
+          onPlayYouTube={handlePlayYouTube}
           onClose={() => setShowSettings(false)}
           onToast={(m) => {
             setToast(m);
