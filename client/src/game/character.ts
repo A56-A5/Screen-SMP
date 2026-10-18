@@ -77,9 +77,9 @@ export function createCharacter(name: string, skin: SkinData): VoxelCharacter {
   let parts = buildSkinnedParts(skin);
 
   // Wrap limb meshes in pivot Groups so rotation is at the shoulder/hip.
-  // The head is a CHILD of the torso holder (pivot at the hip, y0.75) so a
-  // crouch lean carries head + torso as one connected unit — no floating
-  // neck gap.
+  // Head AND arms are CHILDREN of the torso holder (pivot at the hip,
+  // y0.75): a crouch lean carries the whole upper body as one connected
+  // unit, and the shoulder pivots move with it so the arms can't detach.
   const bodyHolder = new THREE.Group();
   bodyHolder.position.y = 0.75;
   parts.body.position.y = 0.375;
@@ -92,17 +92,18 @@ export function createCharacter(name: string, skin: SkinData): VoxelCharacter {
   head.add(parts.head);
   bodyHolder.add(head);
 
+  // Arms: shoulder pivots at world y1.5 = local y0.75 inside the torso holder.
   const rightArm = new THREE.Group();
   rightArm.add(parts.rightArm);
-  rightArm.position.copy(parts.rightArm.position);
+  rightArm.position.set(parts.rightArm.position.x, parts.rightArm.position.y - 0.75, 0);
   parts.rightArm.position.set(0, 0, 0);
-  root.add(rightArm);
+  bodyHolder.add(rightArm);
 
   const leftArm = new THREE.Group();
   leftArm.add(parts.leftArm);
-  leftArm.position.copy(parts.leftArm.position);
+  leftArm.position.set(parts.leftArm.position.x, parts.leftArm.position.y - 0.75, 0);
   parts.leftArm.position.set(0, 0, 0);
-  root.add(leftArm);
+  bodyHolder.add(leftArm);
 
   const rightLeg = new THREE.Group();
   rightLeg.add(parts.rightLeg);
@@ -173,14 +174,22 @@ export function createCharacter(name: string, skin: SkinData): VoxelCharacter {
       currentSkin = newSkin;
 
       // Swap meshes inside their holders/groups (pivots live on the holders;
-      // bodyHolder.clear() also detaches the head group, so re-add it).
+      // bodyHolder.clear() also detaches head + arms, so re-add them).
       head.clear();
       parts.head.position.y = 0.25;
       head.add(parts.head);
+      rightArm.clear();
+      parts.rightArm.position.set(0, 0, 0);
+      rightArm.add(parts.rightArm);
+      leftArm.clear();
+      parts.leftArm.position.set(0, 0, 0);
+      leftArm.add(parts.leftArm);
       bodyHolder.clear();
       parts.body.position.y = 0.375;
       bodyHolder.add(parts.body);
       bodyHolder.add(head);
+      bodyHolder.add(rightArm);
+      bodyHolder.add(leftArm);
 
       parts.rightArm.position.set(0, 0, 0);
       rightArm.clear();
@@ -245,17 +254,19 @@ export function createCharacter(name: string, skin: SkinData): VoxelCharacter {
       }
 
       if (crouching) {
-        // Sneak: torso + head lean forward together as one unit (head is
-        // parented to the torso pivot), with a small extra head bow. Legs
-        // stay nearly straight with a tiny shuffle; arms hang with the lean.
-        leanTo(0.5);
-        head.rotation.x += (0.15 - head.rotation.x) * Math.min(1, dt * 12);
-        const s = moving ? Math.sin(phase) * 0.12 : 0;
+        // Minecraft sneak: the whole upper body (torso + head + shoulder
+        // pivots) leans forward as ONE rigid piece; the head stays aligned
+        // with the back (no extra neck bow); legs stay perfectly straight;
+        // arms hang vertically — counter-rotated by the torso lean so they
+        // remain world-down while the shoulders ride forward with the body.
+        leanTo(0.42);
+        head.rotation.x *= 0.85; // never bow the head — decay any look pitch
+        leftLeg.rotation.x *= 0.85; // legs straight down
+        rightLeg.rotation.x *= 0.85;
+        const s = moving ? Math.sin(phase) * 0.05 : 0;
         if (moving) phase += dt * 6;
-        leftLeg.rotation.x = -0.12 + s;
-        rightLeg.rotation.x = -0.12 - s;
-        leftArm.rotation.x = -0.45 - s * 0.5;
-        rightArm.rotation.x = -0.45 + s * 0.5;
+        leftArm.rotation.x = -bodyHolder.rotation.x + s;
+        rightArm.rotation.x = -bodyHolder.rotation.x - s;
         leftArm.rotation.z = 0.05;
         rightArm.rotation.z = -0.05;
         applyGestures();

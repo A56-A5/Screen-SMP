@@ -175,6 +175,8 @@ export class Game {
     // Directional cancels: S (backwards) only. Strafing with A/D keeps the
     // sprint — a toggle you release by letting go of W (or pressing S).
     if (e.code === "KeyS") this.sprinting = false;
+    // L: toggle the theatre lights from anywhere (same as the lever).
+    if (e.code === "KeyL") this.callbacks.onToggleLights?.();
 
     this.keys.add(e.code);
     if (e.code === "KeyE") this.handleE();
@@ -349,10 +351,10 @@ export class Game {
    */
   setLights(on: boolean) {
     for (const l of this.lampLights) l.intensity = on ? 0.6 : 0.0;
-    if (this.cinemaLight) this.cinemaLight.intensity = on ? 0.9 : 0.06;
-    if (this.glowstoneMat) this.glowstoneMat.emissiveIntensity = on ? 0.6 : 0.02;
-    if (this.hemi) this.hemi.intensity = on ? 0.85 : 0.1;
-    if (this.sun) this.sun.intensity = on ? 0.75 : 0.55;
+    if (this.cinemaLight) this.cinemaLight.intensity = on ? 0.9 : 0.02;
+    if (this.glowstoneMat) this.glowstoneMat.emissiveIntensity = on ? 0.6 : 0.0;
+    if (this.hemi) this.hemi.intensity = on ? 0.85 : 0.045;
+    if (this.sun) this.sun.intensity = on ? 0.75 : 0.45;
     if (this.leverHandle) this.leverHandle.rotation.x = on ? -0.6 : 0.7;
   }
 

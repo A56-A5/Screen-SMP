@@ -467,7 +467,7 @@ export function RoomView({
             roomId: room.roomId,
             senderId: "system",
             senderName: "System",
-            text: "Commands: /help /sit /wave — look at a chair + E to sit, E on the light lever dims the lights, E elsewhere = movie settings, RMB punch, Shift crouch, double-tap W run (W or S cancels), T chat, F5 view, F full-screen video, hold Tab for players.",
+            text: "Commands: /help /sit /wave — look at a chair + E to sit, E on the light lever or press L = theatre lights, E elsewhere = movie settings, RMB punch, Shift crouch, double-tap W run (W or S cancels), T chat, F5 view, F full-screen video, hold Tab for players.",
             timestamp: Date.now(),
             kind: "system" as const,
           },
