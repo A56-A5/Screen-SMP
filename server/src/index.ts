@@ -405,15 +405,6 @@ io.on("connection", (socket) => {
     const result = manager.toggleLights(socket.id);
     if (!result.ok) return;
     io.to(result.roomId).emit("lights:state", { lightsOn: result.lightsOn });
-    io.to(result.roomId).emit("chat:message", {
-      id: `sys-${Date.now()}`,
-      roomId: result.roomId,
-      senderId: "system",
-      senderName: "System",
-      text: result.lightsOn ? "The lights come back on." : "The lights go down.",
-      timestamp: Date.now(),
-      kind: "system",
-    });
   });
 
   socket.on("movie:play", () => {

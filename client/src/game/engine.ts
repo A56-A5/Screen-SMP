@@ -37,6 +37,7 @@ export class Game {
   private seats: SeatSpot[] = [];
   private screenMesh: THREE.Mesh;
   private videoTexture: THREE.VideoTexture | null = null;
+  private spawnPoint = new THREE.Vector3(0, 0, 12);
 
   private localChar: VoxelCharacter;
   private remotes = new Map<string, RemoteEntry>();
@@ -105,6 +106,7 @@ export class Game {
     this.colliders = world.colliders;
     this.seats = world.seats;
     this.screenMesh = world.screenMesh;
+    this.spawnPoint = world.spawn.clone();
     this.lampLights = world.lampLights;
     this.interiorLights = world.interiorLights;
     this.glowstoneMat = world.glowstoneMat;
@@ -583,12 +585,14 @@ export class Game {
       pos.y += sdy;
       const groundY = this.groundHeightAt(pos.x, pos.z, pos.y);
       if (pos.y <= groundY) {
-        // Snap ONTO ground for small rises only (≤0.25). A larger rise
-        // means the ground probe reached into a higher neighbouring zone
-        // while the body is still in the lower one — snapping there popped
+        // Land whenever actively falling (velocityY < 0) — a drop onto a
+        // floor must ALWAYS snap, or a fast fall tunnels into the void.
+        // While jumping (velocityY > 0) or grounded (0), only allow small
+        // rises (≤0.25): a larger rise means the ground probe reached into
+        // a higher neighbouring zone mid-move, and snapping there popped
         // the player up at the theatre steps. Real 1-block steps are
         // climbed by jumping (collides() blocks walking into them).
-        if (groundY - pos.y <= 0.25) {
+        if (groundY - pos.y <= 0.25 || this.velocityY < 0) {
           pos.y = groundY;
           this.velocityY = 0;
           this.onGround = true;
@@ -602,6 +606,15 @@ export class Game {
 
     pos.x = Math.max(-19, Math.min(19, pos.x));
     pos.z = Math.max(-39, Math.min(19, pos.z)); // theatre now reaches z-34
+
+    // Safety net: any tunneling glitch would drop the player below the
+    // lowest legitimate floor (y-3) into an endless void — respawn instead.
+    if (pos.y < -6) {
+      pos.copy(this.spawnPoint);
+      pos.y += 0.1;
+      this.velocityY = 0;
+      this.onGround = true;
+    }
 
     const moving = len > 0.01;
     if (moving) {

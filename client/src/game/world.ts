@@ -202,16 +202,17 @@ export function buildWorld(): WorldResult {
   // --- Riser faces: the zone boxes' front faces are backface-culled from the
   // seat side (you look at the -Z face of the block in front), so each step
   // edge had NO visible vertical texture. Thin concrete slabs flush with the
-  // zone front faces give every riser a proper textured nose. They protrude
-  // 0.05 over the lower carpet and tuck 0.075 under the upper carpet, so no
-  // z-fighting. Visual only — the zone colliders already block movement.
+  // zone front faces give every riser a proper textured nose. They sit
+  // entirely INSIDE the upper zone (front face flush with the step edge at
+  // z, extending +Z) so nothing extrudes into the walking aisle. Visual
+  // only — the zone colliders already block movement.
   for (const { z, top } of [
     { z: -12, top: 0 },
     { z: -17, top: -1 },
     { z: -22, top: -2 },
   ]) {
     const riser = block(28, 1.25, 0.5, mats.concrete);
-    riser.position.set(0, top - 0.575, z + 0.2);
+    riser.position.set(0, top - 0.575, z + 0.25); // spans z..z+0.5, flush
     group.add(riser);
   }
 
@@ -294,6 +295,20 @@ export function buildWorld(): WorldResult {
   const ceilingSlab = block(28.2, 0.3, 28, mats.concrete);
   ceilingSlab.position.set(0, 7.85, -20); // y7.7..8.0, x±14.1, z-34..-6
   group.add(ceilingSlab);
+
+  // --- Interior corner trims: sunlight was bleeding down all FOUR vertical
+  // wall creases (side wall meeting front/back wall). These columns lap
+  // over both walls at every corner, burying the crease. Visual only.
+  for (const [cx, cz, cd] of [
+    [-13.35, -33.35, 0.7], // back-left  (crease x-13.5, z-33.5)
+    [13.35, -33.35, 0.7], // back-right
+    [-13.35, -6.3, 0.8], // front-left  (crease x-13.5, z-6)
+    [13.35, -6.3, 0.8], // front-right
+  ] as [number, number, number][]) {
+    const trim = block(0.7, 13, cd, mats.concrete);
+    trim.position.set(cx, 2.5, cz); // full wall height y-4..9
+    group.add(trim);
+  }
 
   // --- Ceiling light panels (white squares hung just under the slab) ---
   const ceilingPanels: THREE.Mesh[] = [];
