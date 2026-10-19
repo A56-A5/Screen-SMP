@@ -286,16 +286,25 @@ export function buildWorld(): WorldResult {
     }
   }
 
-  // --- Ceiling light panels (white squares flush with the roof) ---
+  // --- Interior ceiling slab: hides EVERY wall/ceiling seam from inside.
+  // Sunlight was bleeding as a thin bright line along the top front edge
+  // (shadow-map bleed at the wall/roof corner). This slab sits just under
+  // the roof bottom (y8) and laps 0.6 into the side walls, burying the
+  // corner where the walls meet the roof. Visual only, no collider.
+  const ceilingSlab = block(28.2, 0.3, 28, mats.concrete);
+  ceilingSlab.position.set(0, 7.85, -20); // y7.7..8.0, x±14.1, z-34..-6
+  group.add(ceilingSlab);
+
+  // --- Ceiling light panels (white squares hung just under the slab) ---
   const ceilingPanels: THREE.Mesh[] = [];
   const panelMat = new THREE.MeshBasicMaterial({ color: 0xf2f4ff });
   for (const px of [-6, 6]) {
     for (const pz of [-12, -19, -26]) {
       const panel = block(1.4, 0.08, 1.4, mats.concrete);
-      panel.position.set(px, 7.96, pz);
+      panel.position.set(px, 7.66, pz); // top flush with slab bottom (7.7)
       group.add(panel);
       const glow = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.06, 1.2), panelMat);
-      glow.position.set(px, 7.9, pz);
+      glow.position.set(px, 7.62, pz);
       group.add(glow);
       ceilingPanels.push(glow);
     }

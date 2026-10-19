@@ -583,9 +583,18 @@ export class Game {
       pos.y += sdy;
       const groundY = this.groundHeightAt(pos.x, pos.z, pos.y);
       if (pos.y <= groundY) {
-        pos.y = groundY;
-        this.velocityY = 0;
-        this.onGround = true;
+        // Snap ONTO ground for small rises only (≤0.25). A larger rise
+        // means the ground probe reached into a higher neighbouring zone
+        // while the body is still in the lower one — snapping there popped
+        // the player up at the theatre steps. Real 1-block steps are
+        // climbed by jumping (collides() blocks walking into them).
+        if (groundY - pos.y <= 0.25) {
+          pos.y = groundY;
+          this.velocityY = 0;
+          this.onGround = true;
+        } else {
+          this.onGround = false;
+        }
       } else {
         this.onGround = false;
       }
@@ -637,12 +646,10 @@ export class Game {
   private collides(x: number, y: number, z: number): boolean {
     const radius = 0.35;
     const feet = y;
-    const head = y + 1.8;
     for (const c of this.colliders) {
       if (c.top <= feet + 0.05) continue;
       if (x + radius < c.minX || x - radius > c.maxX) continue;
       if (z + radius < c.minZ || z - radius > c.maxZ) continue;
-      if (head <= 0) continue;
       return true;
     }
     return false;
