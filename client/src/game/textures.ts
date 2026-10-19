@@ -81,9 +81,12 @@ export const texStoneBrick = () =>
     ctx.fillRect(15, 9, 1, 7);
   });
 
-/** Smooth dark-grey concrete (cinema interior) — flat, no mortar, clean. */
+/** Flat dark-grey concrete (cinema interior) — solid clay-like color, no speckles. */
 export const texConcrete = () =>
-  makeTex((ctx) => speck(ctx, "#4e4e52", ["#46464a", "#56565a", "#404044"], 0.18));
+  makeTex((ctx) => {
+    ctx.fillStyle = "#4e4e52";
+    ctx.fillRect(0, 0, 16, 16);
+  });
 
 export const texWoodPlank = () =>
   makeTex((ctx) => {

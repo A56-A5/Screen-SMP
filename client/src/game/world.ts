@@ -187,39 +187,46 @@ export function buildWorld(): WorldResult {
     { z0: -22, z1: -34, top: -3 }, // front floor + screen area
   ];
   for (const { z0, z1, top } of zones) {
-    const depth = z1 - z0;
-    const zone = block(28, 4 + top, depth, mats.concrete); // y-4 .. top
-    zone.position.set(0, (top - 4) / 2, (z0 + z1) / 2);
+    const zLo = Math.min(z0, z1);
+    const zHi = Math.max(z0, z1);
+    // Zone VISUAL stops 0.5 short of its far (-Z) edge: that strip belongs
+    // to the riser block below, so the two never share a coplanar face
+    // (which z-fought and read as a glitchy extruded lip). The collider
+    // still spans the FULL zone — only the mesh shrinks.
+    const zone = block(28, 4 + top, zHi - zLo - 0.5, mats.concrete); // y-4 .. top
+    zone.position.set(0, (top - 4) / 2, (zLo + 0.5 + zHi) / 2);
     group.add(zone);
     colliders.push({ minX: -14, maxX: 14, minZ: z1, maxZ: z0, top });
     // Red carpet strip on the zone top — raised 0.02 so its bottom face is
     // NOT coplanar with the zone top (z-fighting showed as glitchy patches).
-    const carpet = block(28, 0.12, depth, mats.carpet);
-    carpet.position.set(0, top + 0.08, (z0 + z1) / 2);
+    // Full depth: it laps over the riser top like real aisle carpet.
+    const carpet = block(28, 0.12, zHi - zLo, mats.carpet);
+    carpet.position.set(0, top + 0.08, (zLo + zHi) / 2);
     group.add(carpet);
   }
 
-  // --- Riser faces: the zone boxes' front faces are backface-culled from the
-  // seat side (you look at the -Z face of the block in front), so each step
-  // edge had NO visible vertical texture. Thin concrete slabs flush with the
-  // zone front faces give every riser a proper textured nose. They sit
-  // entirely INSIDE the upper zone (front face flush with the step edge at
-  // z, extending +Z) so nothing extrudes into the walking aisle. Visual
-  // only — the zone colliders already block movement.
+  // --- Riser faces: each step edge gets a concrete slab filling the 0.5
+  // strip the zone visuals left open, flush with the step plane at z (no
+  // protrusion into the aisle) and tucked0.02 under the upper carpet so no
+  // top face is ever exposed. Visual only — zone colliders already block
+  // movement.
   for (const { z, top } of [
     { z: -12, top: 0 },
     { z: -17, top: -1 },
     { z: -22, top: -2 },
   ]) {
-    const riser = block(28, 1.25, 0.5, mats.concrete);
-    riser.position.set(0, top - 0.575, z + 0.25); // spans z..z+0.5, flush
+    const riser = block(28, 1.32, 0.5, mats.concrete);
+    riser.position.set(0, top - 0.64, z + 0.25); // y top-1.3..top+0.02, z..z+0.5
     group.add(riser);
   }
 
   // --- The huge 16:9 cinema screen on the back wall, facing +Z toward seats
-  // (18 wide, floor to near-ceiling — fills the wall like a real theatre) ---
-  const frame = block(19, 11, 0.4, mats.screenFrame);
-  frame.position.set(0, 2, -33.6);
+  // (18 wide, floor to near-ceiling — fills the wall like a real theatre).
+  // The frame is oversized and sunk DEEP into the back wall so its vertical
+  // edges are buried — a thin frame let sunlight bleed along the wall seam
+  // right of the screen.
+  const frame = block(20, 12, 0.6, mats.screenFrame);
+  frame.position.set(0, 2, -33.7); // z-34..-33.4, x±10, y-4..8
   group.add(frame);
 
   const screenGeo = new THREE.PlaneGeometry(18, 10.125); // exact 16:9
