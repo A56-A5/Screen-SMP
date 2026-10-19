@@ -47,6 +47,8 @@ export class Game {
   private pitch = -0.1;
   private sitting = false;
   private seatPos: THREE.Vector3 | null = null;
+  /** Seat root (pan-top x,z) so stand() can eject to the FRONT of the chair. */
+  private seatSpot: SeatSpot | null = null;
   private crouching = false;
   private sprinting = false;
   private lastWTap = 0;
@@ -371,19 +373,27 @@ export class Game {
     // best.y is the pan top; the hip joint sits 0.75 above the root, so put
     // the root BELOW the pan to make the butt rest on it instead of floating.
     this.seatPos = new THREE.Vector3(best.x, best.y - 0.75, best.z);
+    this.seatSpot = best;
     // Model front is +Z; π rotates it to face the screen at -Z.
     this.localChar.root.rotation.y = Math.PI;
     this.localChar.setSitting(true);
   }
 
   private stand() {
-    // Lift feet onto the pan before physics kicks in, otherwise the player
-    // would be standing INSIDE the chair collider and be unable to move.
-    if (this.seatPos) {
-      this.localChar.root.position.y = this.seatPos.y + 0.75;
+    // Eject to the FRONT of the chair (screen side, -Z): the backrest now
+    // has a collider up to tier+1.8, so standing on the pan in place would
+    // trap the player inside it. Dropping 0.7 and 1.1 forward lands on the
+    // carpet aisle between rows (row spacing is 5, pan is 1.2 deep).
+    if (this.seatPos && this.seatSpot) {
+      this.localChar.root.position.set(
+        this.seatSpot.x,
+        this.seatSpot.y - 0.7,
+        this.seatSpot.z - 1.1
+      );
     }
     this.sitting = false;
     this.seatPos = null;
+    this.seatSpot = null;
     this.localChar.setSitting(false);
   }
 
@@ -600,7 +610,12 @@ export class Game {
 
   /** Highest collider top under (x,z) that the player can stand on at height y. */
   private groundHeightAt(x: number, z: number, y: number): number {
-    const r = 0.2;
+    // Probe radius must stay SMALL: with r=0.2 the probe straddled a riser
+    // while walking toward a stair, detected the upper zone early, and
+    // snapped the player up a full block (a 1-block "teleport"). r=0.05
+    // keeps the probe on one side of the edge until the body actually
+    // crosses it — walking up the steps is now gradual, no snap.
+    const r = 0.05;
     let top = -Infinity;
     let covered = false;
     for (const c of this.colliders) {

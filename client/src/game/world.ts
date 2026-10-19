@@ -161,6 +161,17 @@ export function buildWorld(): WorldResult {
   threshold.position.set(0, -2, -4.5); // y-4..0, x±2, z-6..-3
   group.add(threshold);
 
+  // Entrance curtains: two thin panels hung just inside the doorway to
+  // swallow the last daylight slivers that leaked around the door jambs
+  // when the lights go down. Walk-through — NO collider, so you push past
+  // them like real theatre curtains. castShadow is set by the group traverse
+  // below, which is what seals the remaining bright edge.
+  for (const cx of [-0.95, 0.95]) {
+    const curtain = block(2.2, 3.2, 0.08, mats.curtain);
+    curtain.position.set(cx, 1.6, -4.5);
+    group.add(curtain);
+  }
+
   // Roof: oversized so it overhangs every wall incl. the vestibule
   const roof = block(30.4, 1, 33, mats.concrete);
   roof.position.set(0, 8.5, -19);
@@ -186,6 +197,22 @@ export function buildWorld(): WorldResult {
     const carpet = block(28, 0.12, depth, mats.carpet);
     carpet.position.set(0, top + 0.08, (z0 + z1) / 2);
     group.add(carpet);
+  }
+
+  // --- Riser faces: the zone boxes' front faces are backface-culled from the
+  // seat side (you look at the -Z face of the block in front), so each step
+  // edge had NO visible vertical texture. Thin concrete slabs flush with the
+  // zone front faces give every riser a proper textured nose. They protrude
+  // 0.05 over the lower carpet and tuck 0.075 under the upper carpet, so no
+  // z-fighting. Visual only — the zone colliders already block movement.
+  for (const { z, top } of [
+    { z: -12, top: 0 },
+    { z: -17, top: -1 },
+    { z: -22, top: -2 },
+  ]) {
+    const riser = block(28, 1.25, 0.5, mats.concrete);
+    riser.position.set(0, top - 0.575, z + 0.2);
+    group.add(riser);
   }
 
   // --- The huge 16:9 cinema screen on the back wall, facing +Z toward seats
@@ -233,12 +260,25 @@ export function buildWorld(): WorldResult {
       armR.position.set(x + 0.7, tier + 0.4, z);
       group.add(armR);
 
+      // Pan collider (stand on / sit on the seat).
       colliders.push({
         minX: x - 0.8,
         maxX: x + 0.8,
         minZ: z - 0.6,
         maxZ: z + 0.6,
         top: tier + 0.7,
+      });
+      // Backrest collider: jumping from the row behind used to fall
+      // straight through the visual backrest (its collider was pan-height
+      // only). This plugs the gap up to the backrest top. The engine's
+      // stand() now ejects the player to the FRONT of the chair, so being
+      // trapped on the pan by the taller collider is impossible.
+      colliders.push({
+        minX: x - 0.65,
+        maxX: x + 0.65,
+        minZ: z + 0.25,
+        maxZ: z + 0.65,
+        top: tier + 1.8,
       });
       // Seat spot = pan TOP: sitters sink below it (hip height 0.75), and
       // standing up snaps feet onto it.
@@ -369,12 +409,21 @@ export function buildWorld(): WorldResult {
   dir.position.set(12, 22, 8);
   dir.castShadow = true;
   dir.shadow.mapSize.set(2048, 2048);
-  dir.shadow.camera.left = -30;
-  dir.shadow.camera.right = 30;
-  dir.shadow.camera.top = 30;
-  dir.shadow.camera.bottom = -30;
-  dir.shadow.bias = -0.0004;
-  dir.shadow.normalBias = 0.03;
+  // Frustum was ±30: the back wall corners (x±15, z-34) fell OUTSIDE the
+  // shadow map, so the sun shone through the un-shadowed region and lit a
+  // band of the back wall right of the screen plus a bright line near the
+  // ceiling. ±45 comfortably covers the whole building from this direction.
+  dir.shadow.camera.left = -45;
+  dir.shadow.camera.right = 45;
+  dir.shadow.camera.top = 45;
+  dir.shadow.camera.bottom = -45;
+  // Aim the shadow camera at the cinema (target at 0,0,0 is too far +Z),
+  // so the map is centred on the building instead of the spawn lawn.
+  dir.target.position.set(0, 0, -10);
+  group.add(dir.target);
+  dir.shadow.camera.updateProjectionMatrix();
+  dir.shadow.bias = -0.0005;
+  dir.shadow.normalBias = 0.05;
   group.add(dir);
   // Warm interior lights for the cinema. Three.js point lights use inverse-
   // square falloff (decay 2), so intensities must be high to actually read

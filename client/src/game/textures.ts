@@ -81,9 +81,9 @@ export const texStoneBrick = () =>
     ctx.fillRect(15, 9, 1, 7);
   });
 
-/** Smooth grey concrete (cinema interior) — flat, no mortar, clean. */
+/** Smooth dark-grey concrete (cinema interior) — flat, no mortar, clean. */
 export const texConcrete = () =>
-  makeTex((ctx) => speck(ctx, "#8a8a8e", ["#828286", "#929296", "#7e7e82"], 0.14));
+  makeTex((ctx) => speck(ctx, "#4e4e52", ["#46464a", "#56565a", "#404044"], 0.18));
 
 export const texWoodPlank = () =>
   makeTex((ctx) => {
@@ -166,6 +166,20 @@ export const texPath = () =>
 export const texCarpet = () =>
   makeTex((ctx) => speck(ctx, "#8a2a2a", ["#7e2626", "#963030"], 0.2));
 
+/** Dark-red theatre curtain with vertical fold stripes. */
+export const texCurtain = () =>
+  makeTex((ctx) => {
+    speck(ctx, "#6b2020", ["#5f1c1c", "#772626"], 0.15);
+    for (let x = 0; x < 16; x += 3) {
+      ctx.fillStyle = "#551616";
+      ctx.fillRect(x, 0, 1, 16);
+    }
+    for (let x = 2; x < 16; x += 3) {
+      ctx.fillStyle = "#7a2a2a";
+      ctx.fillRect(x, 0, 1, 16);
+    }
+  });
+
 /** Materials built from the textures (reused, shared). */
 export interface BlockMaterials {
   grassTop: THREE.MeshLambertMaterial;
@@ -183,6 +197,7 @@ export interface BlockMaterials {
   screenFrame: THREE.MeshLambertMaterial;
   path: THREE.MeshLambertMaterial;
   carpet: THREE.MeshLambertMaterial;
+  curtain: THREE.MeshLambertMaterial;
   dispose(): void;
 }
 
@@ -203,6 +218,7 @@ export function createBlockMaterials(): BlockMaterials {
     screenFrame: new THREE.MeshLambertMaterial({ map: texScreenFrame() }),
     path: new THREE.MeshLambertMaterial({ map: texPath() }),
     carpet: new THREE.MeshLambertMaterial({ map: texCarpet() }),
+    curtain: new THREE.MeshLambertMaterial({ map: texCurtain() }),
     dispose() {
       Object.values(mats).forEach((m) => {
         if (m instanceof THREE.MeshLambertMaterial) {
