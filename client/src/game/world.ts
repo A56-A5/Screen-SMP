@@ -12,11 +12,17 @@ import {
  * A Minecraft-style world built at strict block scale:
  * - every shape is a box with textures tiling exactly once per 1x1 block
  * - grass ground with a stone-brick path
- * - a big cinema (20 wide x 20 deep) with stadium-tier seating:
- *   3 rows on rising platforms so back rows see over the front
+ * - a BIG sunken cinema (28 wide x 28 deep) BELOW ground level in grey
+ *   concrete: flat entrance at y0 via a 3-deep vestibule that swallows
+ *   direct sun (walk straight in, no jump), floor steps DOWN toward the
+ *   screen (front at y-3), 4 rows of 9 seats rising 1 block per row away
+ *   from the screen (back row = entrance height)
+ * - huge 18-wide 16:9 screen, ceiling light panels, light lever beside it
  * - proper theater chairs: seat pan + backrest + armrests, 2.2 blocks apart
  * - lounge, trees, glowstone lamps
  * Seats face the screen (-Z): backrests are on the +Z side.
+ * All structure overlaps (walls into roof, roof overhangs) so the sun
+ * cannot leak through seams when the theatre lights are off.
  */
 
 export interface Collider {
@@ -56,6 +62,8 @@ export interface WorldResult {
   leverHandle: THREE.Mesh;
   /** Interaction point for the lever (E while looking at it). */
   leverSpot: { x: number; y: number; z: number };
+  /** White ceiling light panels inside the cinema (toggle with lights). */
+  ceilingPanels: THREE.Mesh[];
 }
 
 export function buildWorld(): WorldResult {
@@ -64,128 +72,147 @@ export function buildWorld(): WorldResult {
   const seats: SeatSpot[] = [];
   const mats = createBlockMaterials();
 
-  // --- Ground: grass blocks under everything (x -20..20, z -30..20) ---
+  // --- Ground: grass blocks (x -20..20, z -40..20). The sunken cinema's
+  // footprint is skipped (the theatre fills it below y0), and the ground
+  // CASTS shadows so no sun reaches anything underneath it.
   const groundGeo = new THREE.BoxGeometry(1, 1, 1);
   const ground = new THREE.InstancedMesh(
     groundGeo,
     new THREE.MeshLambertMaterial({ map: mats.grassTop.map }),
-    40 * 50
+    40 * 60
   );
   const dummy = new THREE.Object3D();
   let gi = 0;
   for (let x = -20; x < 20; x++) {
-    for (let z = -30; z < 20; z++) {
+    for (let z = -40; z < 20; z++) {
+      // Skip grass only for cells FULLY inside the theatre footprint —
+      // boundary cells stay (hidden inside the thick walls/zones) so there
+      // is no void trench around the building that shows up as black holes.
+      // Also skip the vestibule doorway floor (filled by the threshold block).
+      const inFootprint =
+        (x >= -14 && x <= 13 && z >= -34 && z <= -7) ||
+        (x >= -2 && x <= 1 && z >= -6 && z <= -4);
+      if (inFootprint) continue;
       dummy.position.set(x + 0.5, -0.5, z + 0.5);
       dummy.updateMatrix();
       ground.setMatrixAt(gi, dummy.matrix);
       gi++;
     }
   }
+  ground.count = gi;
   ground.instanceMatrix.needsUpdate = true;
   ground.receiveShadow = true;
+  ground.castShadow = true; // blocks the sun from the sunken interior
   group.add(ground);
   groundGeo.dispose();
 
-  // Path from spawn to cinema (stone bricks, 1 block wide, thin slab)
-  for (let z = 12; z >= -5; z--) {
+  // Path from spawn to the cinema door (stone bricks, 1 block wide, thin slab)
+  for (let z = 12; z >= -2; z--) {
     const p = block(1, 0.1, 1, mats.stoneBrick);
     p.position.set(0.5, 0.05, z + 0.5);
     group.add(p);
   }
 
-  // --- Cinema building: interior x [-10, 10], z [-6, -26], height 8 ---
-  // Back wall (screen wall)
-  const backWall = block(20, 8, 1, mats.stoneBrick);
-  backWall.position.set(0, 4, -26);
-  group.add(backWall);
-  colliders.push({ minX: -10, maxX: 10, minZ: -26.5, maxZ: -25.5, top: 8 });
+  // --- Sunken cinema: interior x [-14, 14], z [-34, -6], ceiling y8 ---
+  // Walls run y-4..9 (well below the sunken floor and into the roof) and
+  // overlap each other / the roof so no seam can leak light.
 
-  // Side walls
-  const leftWall = block(1, 8, 20, mats.stoneBrick);
-  leftWall.position.set(-10, 4, -16);
+  // Side walls (overlap front + back wall ends by 0.5)
+  const leftWall = block(1, 13, 28, mats.concrete);
+  leftWall.position.set(-14, 2.5, -20);
   group.add(leftWall);
-  colliders.push({ minX: -10.5, maxX: -9.5, minZ: -26, maxZ: -6, top: 8 });
+  colliders.push({ minX: -14.5, maxX: -13.5, minZ: -34, maxZ: -6, top: 9 });
 
-  const rightWall = block(1, 8, 20, mats.stoneBrick);
-  rightWall.position.set(10, 4, -16);
+  const rightWall = block(1, 13, 28, mats.concrete);
+  rightWall.position.set(14, 2.5, -20);
   group.add(rightWall);
-  colliders.push({ minX: 9.5, maxX: 10.5, minZ: -26, maxZ: -6, top: 8 });
+  colliders.push({ minX: 13.5, maxX: 14.5, minZ: -34, maxZ: -6, top: 9 });
 
-  // Roof (wood planks)
-  const roof = block(21, 1, 21, mats.woodPlank);
-  roof.position.set(0, 8.5, -16);
+  // Screen wall (back, z=-34): full width, overlaps side walls
+  const backWall = block(30, 13, 1, mats.concrete);
+  backWall.position.set(0, 2.5, -34);
+  group.add(backWall);
+  colliders.push({ minX: -15, maxX: 15, minZ: -34.5, maxZ: -33.5, top: 9 });
+
+  // Front wall is a 3-deep vestibule (z -6..-3) with the same centered
+  // doorway (x ±2, height 3) — flat threshold at y0 so you walk straight
+  // in, no jump. The tunnel swallows direct sun: rays entering the outer
+  // mouth hit the tunnel floor/walls long before the seats, so toggling
+  // the lights down actually darkens the room.
+  const frontLeft = block(12.5, 13, 3, mats.concrete);
+  frontLeft.position.set(-8.25, 2.5, -4.5);
+  group.add(frontLeft);
+  colliders.push({ minX: -14.5, maxX: -2, minZ: -6, maxZ: -3, top: 9 });
+
+  const frontRight = block(12.5, 13, 3, mats.concrete);
+  frontRight.position.set(8.25, 2.5, -4.5);
+  group.add(frontRight);
+  colliders.push({ minX: 2, maxX: 14.5, minZ: -6, maxZ: -3, top: 9 });
+
+  // Lintel over the door through the full tunnel depth — visual only, NO
+  // collider: colliders are solid from the ground up, so a lintel collider
+  // would plug the doorway shut. A max jump (head 2.98) cannot reach y3.
+  const doorLintel = block(4, 5, 3, mats.concrete);
+  doorLintel.position.set(0, 5.5, -4.5);
+  group.add(doorLintel);
+
+  // Solid threshold floor under the doorway (kills the old void strip).
+  const threshold = block(4, 4, 3, mats.concrete);
+  threshold.position.set(0, -2, -4.5); // y-4..0, x±2, z-6..-3
+  group.add(threshold);
+
+  // Roof: oversized so it overhangs every wall incl. the vestibule
+  const roof = block(30.4, 1, 33, mats.concrete);
+  roof.position.set(0, 8.5, -19);
   group.add(roof);
 
-  // Front lintel over the open entrance
-  const lintel = block(21, 2, 1, mats.woodPlank);
-  lintel.position.set(0, 7, -6);
-  group.add(lintel);
+  // --- Sunken floor zones: flat at the door (y0), stepping DOWN toward the
+  // screen (final floor y-3). Seats rise 1 block per row AWAY from the
+  // screen, so the back row sits at entrance height — walk in, no jump.
+  const zones: { z0: number; z1: number; top: number }[] = [
+    { z0: -6, z1: -12, top: 0 }, // back row zone — flat with outside ground
+    { z0: -12, z1: -17, top: -1 },
+    { z0: -17, z1: -22, top: -2 },
+    { z0: -22, z1: -34, top: -3 }, // front floor + screen area
+  ];
+  for (const { z0, z1, top } of zones) {
+    const depth = z1 - z0;
+    const zone = block(28, 4 + top, depth, mats.concrete); // y-4 .. top
+    zone.position.set(0, (top - 4) / 2, (z0 + z1) / 2);
+    group.add(zone);
+    colliders.push({ minX: -14, maxX: 14, minZ: z1, maxZ: z0, top });
+    // Red carpet strip on the zone top — raised 0.02 so its bottom face is
+    // NOT coplanar with the zone top (z-fighting showed as glitchy patches).
+    const carpet = block(28, 0.12, depth, mats.carpet);
+    carpet.position.set(0, top + 0.08, (z0 + z1) / 2);
+    group.add(carpet);
+  }
 
-  // --- Stadium tiers: rows rise AWAY from the screen (real theatre layout) ---
-  // Front row (z=-19, nearest the screen) sits on ground level.
-  // Middle row (z=-14.5) on a +1 platform. Back row (z=-10) on a +2 platform.
-  // Entry step (top y=1) at the door so the 2-high back tier is climbable
-  // with normal jumps (max jump ≈ 1.18 blocks).
-
-  // Entry step: z -6.5..-8
-  const entryStep = block(19, 1, 1.5, mats.stoneBrick);
-  entryStep.position.set(0, 0.5, -7.25);
-  group.add(entryStep);
-  colliders.push({ minX: -9.5, maxX: 9.5, minZ: -8, maxZ: -6.5, top: 1 });
-
-  // Back tier (top y=2): z -8..-12.5 — solid 2-high so it reads as stacked blocks
-  const backTier = block(19, 2, 4.5, mats.stoneBrick);
-  backTier.position.set(0, 1, -10.25);
-  group.add(backTier);
-  colliders.push({ minX: -9.5, maxX: 9.5, minZ: -12.5, maxZ: -8, top: 2 });
-
-  // Middle tier (top y=1): z -12.5..-17
-  const midTier = block(19, 1, 4.5, mats.stoneBrick);
-  midTier.position.set(0, 0.5, -14.75);
-  group.add(midTier);
-  colliders.push({ minX: -9.5, maxX: 9.5, minZ: -17, maxZ: -12.5, top: 1 });
-
-  // Red carpet: ground zone by the screen, then one strip per tier top
-  const carpetFront = block(19, 0.1, 8.5, mats.carpet); // z -17..-25.5, ground
-  carpetFront.position.set(0, 0.05, -21.25);
-  group.add(carpetFront);
-
-  const carpetMid = block(19, 0.1, 4.5, mats.carpet); // middle tier top
-  carpetMid.position.set(0, 1.05, -14.75);
-  group.add(carpetMid);
-
-  const carpetBack = block(19, 0.1, 4.5, mats.carpet); // back tier top
-  carpetBack.position.set(0, 2.05, -10.25);
-  group.add(carpetBack);
-
-  const carpetStep = block(19, 0.1, 1.5, mats.carpet); // entry step top
-  carpetStep.position.set(0, 1.05, -7.25);
-  group.add(carpetStep);
-
-  // --- The big screen (on back wall, facing +Z toward seats) ---
-  const frame = block(15, 8, 0.4, mats.screenFrame);
-  frame.position.set(0, 4, -25.6);
+  // --- The huge 16:9 cinema screen on the back wall, facing +Z toward seats
+  // (18 wide, floor to near-ceiling — fills the wall like a real theatre) ---
+  const frame = block(19, 11, 0.4, mats.screenFrame);
+  frame.position.set(0, 2, -33.6);
   group.add(frame);
 
-  const screenGeo = new THREE.PlaneGeometry(14, 7.5);
+  const screenGeo = new THREE.PlaneGeometry(18, 10.125); // exact 16:9
   const screenMat = new THREE.MeshBasicMaterial({ color: 0x0a0a0a });
   const screenMesh = new THREE.Mesh(screenGeo, screenMat);
-  screenMesh.position.set(0, 4, -25.35);
+  screenMesh.position.set(0, 2, -33.35);
   group.add(screenMesh);
 
-  colliders.push({ minX: -7, maxX: 7, minZ: -25.7, maxZ: -25.3, top: 8 });
+  colliders.push({ minX: -9.5, maxX: 9.5, minZ: -33.7, maxZ: -33.3, top: 9 });
 
-  // --- Theater chairs: pan + backrest + two armrests ---
-  // Rows rise 1 block each AWAY from the screen: front row on ground,
-  // middle +1, back +2 (highest). 7 seats per row, 2.2 blocks apart.
+  // --- Theater chairs: 4 rows x 9 seats, rising 1 block per row away from
+  // the screen (row tiers match the sunken floor zones) ---
   const rowTiers: { z: number; tier: number }[] = [
-    { z: -19, tier: 0 }, // front row — nearest the screen, ground level
-    { z: -14.5, tier: 1 }, // middle row — +1
-    { z: -10, tier: 2 }, // back row — +2, highest, near the entrance
+    { z: -10, tier: 0 }, // back row — entrance height
+    { z: -15, tier: -1 },
+    { z: -20, tier: -2 },
+    { z: -25, tier: -3 }, // front row — nearest the screen
   ];
   for (const { z, tier } of rowTiers) {
-    for (let col = 0; col < 7; col++) {
-      const x = -6.6 + col * 2.2;
+    for (let col = 0; col < 9; col++) {
+      const x = -8.8 + col * 2.2;
 
       // Seat pan: 1.2 wide, 0.7 tall — top at tier + 0.7
       const pan = block(1.2, 0.7, 1.2, mats.seat);
@@ -219,6 +246,21 @@ export function buildWorld(): WorldResult {
     }
   }
 
+  // --- Ceiling light panels (white squares flush with the roof) ---
+  const ceilingPanels: THREE.Mesh[] = [];
+  const panelMat = new THREE.MeshBasicMaterial({ color: 0xf2f4ff });
+  for (const px of [-6, 6]) {
+    for (const pz of [-12, -19, -26]) {
+      const panel = block(1.4, 0.08, 1.4, mats.concrete);
+      panel.position.set(px, 7.96, pz);
+      group.add(panel);
+      const glow = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.06, 1.2), panelMat);
+      glow.position.set(px, 7.9, pz);
+      group.add(glow);
+      ceilingPanels.push(glow);
+    }
+  }
+
   // --- Glowstone lamps on log posts along the path ---
   const lampLights: THREE.PointLight[] = [];
   const lampSpots: [number, number][] = [
@@ -242,21 +284,22 @@ export function buildWorld(): WorldResult {
     lampLights.push(light);
   }
 
-  // --- Theatre light lever: inside the theatre, against the back wall just
-  // LEFT of the screen (screen frame spans x ±7.5 — lever sits at x -8.5).
-  const leverX = -8.5;
-  const leverZ = -25.0;
+  // --- Theatre light lever: inside, against the screen wall just LEFT of
+  // the frame (frame spans x ±8.5 — lever at x -11.5, on the front floor).
+  const leverX = -11.5;
+  const leverZ = -33;
+  const leverBaseY = -3; // front floor top
   const leverPost = block(0.4, 1.8, 0.4, mats.logSide);
-  leverPost.position.set(leverX, 0.9, leverZ);
+  leverPost.position.set(leverX, leverBaseY + 0.9, leverZ);
   group.add(leverPost);
   const leverMount = block(0.5, 0.35, 0.5, mats.stoneBrick);
-  leverMount.position.set(leverX, 1.55, leverZ);
+  leverMount.position.set(leverX, leverBaseY + 1.55, leverZ);
   group.add(leverMount);
   // Pivoting stone handle, pivot at the mount top. Up = lights on.
   const leverHandleGeo = new THREE.BoxGeometry(0.14, 0.55, 0.14);
   leverHandleGeo.translate(0, 0.275, 0);
   const leverHandle = new THREE.Mesh(leverHandleGeo, mats.stoneBrick);
-  leverHandle.position.set(leverX, 1.7, leverZ);
+  leverHandle.position.set(leverX, leverBaseY + 1.7, leverZ);
   leverHandle.rotation.x = -0.6;
   group.add(leverHandle);
   colliders.push({
@@ -264,15 +307,15 @@ export function buildWorld(): WorldResult {
     maxX: leverX + 0.25,
     minZ: leverZ - 0.25,
     maxZ: leverZ + 0.25,
-    top: 1.8,
+    top: leverBaseY + 1.8,
   });
 
   // --- Trees (log trunk + leaf cubes) ---
   const treeSpots: [number, number][] = [
     [-14, 8],
     [14, 8],
-    [-12, -4],
-    [12, -4],
+    [-12, 2], // moved off the sunken cinema footprint
+    [12, 2],
     [-16, 0],
     [16, 0],
     [-10, 14],
@@ -337,11 +380,11 @@ export function buildWorld(): WorldResult {
   // square falloff (decay 2), so intensities must be high to actually read
   // across an 8+-block room.
   const cinemaLight = new THREE.PointLight(0xffe0b0, 45, 28);
-  cinemaLight.position.set(0, 6, -14);
+  cinemaLight.position.set(0, 6, -19);
   cinemaLight.userData.onIntensity = 45;
   group.add(cinemaLight);
   const screenLight = new THREE.PointLight(0xffe0b0, 25, 18);
-  screenLight.position.set(0, 5, -22);
+  screenLight.position.set(0, 5, -30);
   screenLight.userData.onIntensity = 25;
   group.add(screenLight);
   const interiorLights = [cinemaLight, screenLight];
@@ -349,7 +392,8 @@ export function buildWorld(): WorldResult {
   // Every structural/decor mesh must CAST shadows — otherwise the sun
   // leaks straight through the walls and roof and lights the interior
   // unevenly (bright toward +x, black away from it) even with "lights off".
-  // The ground only receives.
+  // The ground casts too (the cinema is sunken BELOW y0 — grass blocks are
+  // the only roof over the front zones).
   group.traverse((o) => {
     const mesh = o as THREE.Mesh;
     if (mesh !== ground && (mesh as THREE.Mesh).isMesh) {
@@ -373,7 +417,8 @@ export function buildWorld(): WorldResult {
     hemi,
     sun: dir,
     leverHandle,
-    leverSpot: { x: leverX, y: 1.5, z: leverZ },
+    leverSpot: { x: leverX, y: leverBaseY + 1.5, z: leverZ },
+    ceilingPanels,
   };
 }
 

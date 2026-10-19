@@ -81,6 +81,10 @@ export const texStoneBrick = () =>
     ctx.fillRect(15, 9, 1, 7);
   });
 
+/** Smooth grey concrete (cinema interior) — flat, no mortar, clean. */
+export const texConcrete = () =>
+  makeTex((ctx) => speck(ctx, "#8a8a8e", ["#828286", "#929296", "#7e7e82"], 0.14));
+
 export const texWoodPlank = () =>
   makeTex((ctx) => {
     speck(ctx, "#9c7f4e", ["#927647", "#a58755", "#8a6f42"], 0.2);
@@ -169,6 +173,7 @@ export interface BlockMaterials {
   dirt: THREE.MeshLambertMaterial;
   stone: THREE.MeshLambertMaterial;
   stoneBrick: THREE.MeshLambertMaterial;
+  concrete: THREE.MeshLambertMaterial;
   woodPlank: THREE.MeshLambertMaterial;
   logSide: THREE.MeshLambertMaterial;
   logTop: THREE.MeshLambertMaterial;
@@ -188,6 +193,7 @@ export function createBlockMaterials(): BlockMaterials {
     dirt: new THREE.MeshLambertMaterial({ map: texDirt() }),
     stone: new THREE.MeshLambertMaterial({ map: texStone() }),
     stoneBrick: new THREE.MeshLambertMaterial({ map: texStoneBrick() }),
+    concrete: new THREE.MeshLambertMaterial({ map: texConcrete() }),
     woodPlank: new THREE.MeshLambertMaterial({ map: texWoodPlank() }),
     logSide: new THREE.MeshLambertMaterial({ map: texLogSide() }),
     logTop: new THREE.MeshLambertMaterial({ map: texLogTop() }),

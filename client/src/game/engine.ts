@@ -73,6 +73,7 @@ export class Game {
   private sun: THREE.DirectionalLight | null = null;
   private leverHandle: THREE.Mesh | null = null;
   private leverSpot: { x: number; y: number; z: number } | null = null;
+  private ceilingPanels: THREE.Mesh[] = [];
 
   constructor(
     private container: HTMLElement,
@@ -109,6 +110,7 @@ export class Game {
     this.sun = world.sun;
     this.leverHandle = world.leverHandle;
     this.leverSpot = world.leverSpot;
+    this.ceilingPanels = world.ceilingPanels;
 
     this.localChar = createCharacter(localName, createSteveSkin());
     this.localChar.root.position.copy(world.spawn);
@@ -356,6 +358,11 @@ export class Game {
     if (this.hemi) this.hemi.intensity = on ? 0.85 : 0.045;
     if (this.sun) this.sun.intensity = on ? 0.75 : 0.45;
     if (this.leverHandle) this.leverHandle.rotation.x = on ? -0.6 : 0.7;
+    // Ceiling panels use MeshBasicMaterial (unlit) — they must be painted
+    // near-black when the lights go down, or they stay glowing white.
+    for (const p of this.ceilingPanels) {
+      (p.material as THREE.MeshBasicMaterial).color.setHex(on ? 0xf2f4ff : 0x0c0c10);
+    }
   }
 
   private sitOn(best: SeatSpot) {
@@ -575,7 +582,7 @@ export class Game {
     }
 
     pos.x = Math.max(-19, Math.min(19, pos.x));
-    pos.z = Math.max(-25, Math.min(19, pos.z));
+    pos.z = Math.max(-39, Math.min(19, pos.z)); // theatre now reaches z-34
 
     const moving = len > 0.01;
     if (moving) {
@@ -593,15 +600,23 @@ export class Game {
 
   /** Highest collider top under (x,z) that the player can stand on at height y. */
   private groundHeightAt(x: number, z: number, y: number): number {
-    let top = 0;
     const r = 0.2;
+    let top = -Infinity;
+    let covered = false;
     for (const c of this.colliders) {
       if (x + r < c.minX || x - r > c.maxX) continue;
       if (z + r < c.minZ || z - r > c.maxZ) continue;
       if (c.top > y + 0.15) continue; // too tall to step onto from here
-      if (c.top > top) top = c.top;
+      if (!covered || c.top > top) {
+        top = c.top;
+        covered = true;
+      }
     }
-    return top;
+    // No collider underfoot = outdoor grass at y0. The sunken cinema zones
+    // ARE colliders with negative tops, so they must WIN over the outdoor
+    // default — otherwise the old hardcoded 0 pinned the player at entrance
+    // height and the first three rows (y-1/-2/-3) were unreachable.
+    return covered ? top : 0;
   }
 
   private collides(x: number, y: number, z: number): boolean {
