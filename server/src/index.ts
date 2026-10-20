@@ -69,7 +69,7 @@ app.get("/api/videos", (_req, res) => {
   res.json({ videos: SAMPLE_VIDEOS });
 });
 
-// --- YouTube live-stream proxy (ambient screen video) ---
+// --- YouTube live-stream proxy (pasted YouTube video links) ---
 // yt-dlp resolves the stream URL; we proxy the HLS master playlist and its
 // segments/variants through this server so the browser stays same-origin.
 // The client plays it with hls.js (Chrome has no native HLS).

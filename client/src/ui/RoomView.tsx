@@ -20,9 +20,6 @@ import { ChatPanel } from "./ChatPanel";
 import { MovieBrowser } from "./MovieBrowser";
 import { MovieSettings } from "./MovieSettings";
 
-/** Ambient test video shown on the cinema screen whenever no movie is selected. */
-const TEST_YT_VIDEO_ID = "rFZHOHl-L8A";
-
 export function RoomView({
   initialRoom,
   myId,
@@ -182,8 +179,8 @@ export function RoomView({
   }, [myId]);
 
   // Attach video element to 3D screen.
-  // - No movie selected: ambient test live stream (looping, local; plays
-  //    with sound, falling back to muted if autoplay blocks it).
+  // - No movie selected: screen stays dark (no ambient filler — every
+  //   proxied stream costs real bandwidth on hosted deployments).
   // - Pasted link: auto-detected — direct file via <video>, HLS via hls.js,
   //   DASH via dash.js, unknown/proxied pages sniffed via HEAD (the server
   //   resolves pages first, so the served content-type is authoritative).
@@ -192,8 +189,8 @@ export function RoomView({
     const g = gameRef.current;
     if (!v || !g) return;
 
-    // Fully stop whatever played before — hls.destroy() alone lets the
-    // element keep playing buffered audio (the "lofi keeps going" bug).
+    // Fully stop whatever played before — hls.destroy() alone leaves the
+    // element playing its buffered tail (audio kept going after a switch).
     const stopMedia = () => {
       hlsRef.current?.destroy();
       hlsRef.current = null;
@@ -277,18 +274,7 @@ export function RoomView({
     const setup = async () => {
       const url = playback.videoUrl;
       if (!url) {
-        // Ambient no-movie stream: known HLS, looping. Try with sound (lofi
-        // radio); browsers that block unmuted autoplay fall back to muted.
-        const src = `/api/youtube/stream?videoId=${TEST_YT_VIDEO_ID}`;
-        v.loop = true;
-        v.muted = false;
-        if (Hls.isSupported()) attachHls(src);
-        else v.src = src; // Safari: native HLS
-        v.play().catch(() => {
-          if (cancelled) return;
-          v.muted = true;
-          v.play().catch(() => {});
-        });
+        // Nothing selected: stopMedia() already ran — screen stays dark.
         return;
       }
       v.loop = false;
