@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { PlaybackState, SampleVideo } from "../net/types";
 import { parseYouTubeId } from "../net/youtube";
+import { classifySource, normalizeMediaUrl, sourceLabel } from "../net/source";
 
 function fmt(sec: number): string {
   if (!Number.isFinite(sec) || sec < 0) return "0:00";
@@ -23,6 +24,7 @@ export function MovieSettings({
   onSeek,
   onSwitchMovie,
   onPlayYouTube,
+  onPlayUrl,
   onClose,
   onToast,
 }: {
@@ -35,6 +37,7 @@ export function MovieSettings({
   onSeek: (pos: number) => void;
   onSwitchMovie: () => void;
   onPlayYouTube: (videoId: string) => void;
+  onPlayUrl: (url: string) => void;
   onClose: () => void;
   onToast: (msg: string) => void;
 }) {
@@ -62,6 +65,17 @@ export function MovieSettings({
   // HLS live streams report duration === Infinity — show LIVE, no scrubbing.
   const isLive = video?.duration === Infinity;
   const ytId = parseYouTubeId(ytInput);
+  const trimmed = ytInput.trim();
+  const linkKind = trimmed ? classifySource(trimmed) : null;
+  const linkUrl = linkKind && linkKind !== "invalid" ? normalizeMediaUrl(trimmed) : null;
+  const canPlay = !!(linkKind && linkUrl);
+
+  const submitLink = () => {
+    if (!linkKind || !linkUrl) return;
+    if (linkKind === "youtube" && ytId) onPlayYouTube(ytId);
+    else onPlayUrl(linkUrl);
+    setYtInput("");
+  };
 
   const toggleCaptions = () => {
     if (!video) {
@@ -89,38 +103,29 @@ export function MovieSettings({
       <div className="mc-modal mc-settings" onClick={(e) => e.stopPropagation()}>
         <div className="mc-modal-title">Movie Settings</div>
 
-        {/* YouTube picker */}
+        {/* Link picker: direct files, HLS/DASH, YouTube/Vimeo, or any page */}
         {isHost && (
           <div className="mc-settings-yt">
-            <div className="mc-settings-yt-label">Play a YouTube video</div>
+            <div className="mc-settings-yt-label">Play a video link</div>
             <div className="mc-settings-row">
               <input
                 className="mc-input mc-settings-yt-input"
-                placeholder="Paste a YouTube link…"
+                placeholder="YouTube, Vimeo, MP4, HLS, DASH, or a video page…"
                 value={ytInput}
                 onChange={(e) => setYtInput(e.target.value)}
                 onKeyDown={(e) => {
-                  if (e.key === "Enter" && ytId) {
-                    onPlayYouTube(ytId);
-                    setYtInput("");
-                  }
+                  if (e.key === "Enter") submitLink();
                 }}
               />
               <button
                 className="mc-btn mc-btn-small mc-btn-primary"
-                disabled={!ytId}
-                onClick={() => {
-                  if (!ytId) return;
-                  onPlayYouTube(ytId);
-                  setYtInput("");
-                }}
+                disabled={!canPlay}
+                onClick={submitLink}
               >
                 Play
               </button>
             </div>
-            {ytInput.trim() && !ytId && (
-              <div className="mc-modal-note">That doesn't look like a YouTube link.</div>
-            )}
+            {linkKind && <div className="mc-modal-note">{sourceLabel(linkKind)}</div>}
           </div>
         )}
 

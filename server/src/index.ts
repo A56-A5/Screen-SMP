@@ -5,6 +5,18 @@ import { Readable } from "node:stream";
 import express from "express";
 import { Server } from "socket.io";
 import { RoomManager, SAMPLE_VIDEOS } from "./rooms.js";
+import {
+  MEDIA_UA,
+  SourceError,
+  classifyUrl,
+  detectDrmManifest,
+  invalidateBySegment,
+  invalidateSource,
+  rewriteDashManifest,
+  rewriteHlsManifest,
+  resolveSource,
+  validateMediaUrl,
+} from "./sources.js";
 import type {
   Appearance,
   ChatSendPayload,
@@ -228,6 +240,179 @@ app.get("/api/youtube/seg", async (req, res) => {
   }
 });
 
+// --- Generic media proxy: any pasted link (direct files, HLS, DASH, pages) ---
+// The original URL rides in `u`; resolution (yt-dlp / Vimeo config) happens
+// here with a cache, so expired signed URLs re-resolve on 401/403 exactly like
+// the YouTube path above.
+app.get("/api/stream", async (req, res) => {
+  const check = await validateMediaUrl(String(req.query.u ?? ""));
+  if (!check.ok) return res.status(400).json({ error: check.error });
+  const pageUrl = check.url;
+
+  for (let attempt = 0; attempt < 2; attempt++) {
+    // 401/403 = stale signed URL: drop cache, re-resolve once, then give up.
+    const retryOr502 = (): boolean => {
+      if (attempt === 0) return true;
+      if (!res.headersSent) {
+        res.status(502).json({ error: "The video source rejected the stream. Try selecting it again." });
+      }
+      return false;
+    };
+    try {
+      const kind = classifyUrl(pageUrl);
+      let target = pageUrl;
+      if (kind !== "direct" && kind !== "hls" && kind !== "dash") {
+        target = (await resolveSource(pageUrl)).mediaUrl;
+      }
+
+      // Sniff with a tiny ranged GET (first chunk only) — never buffer whole
+      // media files; playlists/manifests get fully fetched below instead.
+      const sniff = await fetch(target, {
+        headers: { "user-agent": MEDIA_UA, range: "bytes=0-63" },
+        signal: AbortSignal.timeout(20_000),
+      });
+      if (sniff.status === 401 || sniff.status === 403) {
+        invalidateSource(pageUrl);
+        if (!retryOr502()) return;
+        continue;
+      }
+      if (!sniff.ok) throw new Error(`upstream ${sniff.status}`);
+      const reader = sniff.body?.getReader();
+      let first: Uint8Array | undefined;
+      if (reader) {
+        const { value } = await reader.read();
+        first = value;
+        await reader.cancel().catch(() => {});
+      }
+      const head = Buffer.from(first ?? new Uint8Array(0)).toString("latin1").trimStart();
+      const isM3u8 = head.startsWith("#EXTM3U");
+      const isMpd = head.startsWith("<?xml") || head.startsWith("<MPD") || /\.mpd(\?|$)/i.test(target);
+
+      // The client's type-sniff: answer from the byte probe.
+      if (req.method === "HEAD") {
+        if (isM3u8) res.setHeader("content-type", "application/vnd.apple.mpegurl");
+        else if (isMpd) res.setHeader("content-type", "application/dash+xml");
+        else res.setHeader("content-type", sniff.headers.get("content-type") ?? "video/mp4");
+        const total = sniff.headers.get("content-range")?.split("/")[1];
+        if (total && total !== "*") res.setHeader("content-length", total);
+        return res.end();
+      }
+
+      if (isM3u8 || isMpd) {
+        const full = await fetch(target, {
+          headers: { "user-agent": MEDIA_UA },
+          signal: AbortSignal.timeout(30_000),
+        });
+        if (full.status === 401 || full.status === 403) {
+          invalidateSource(pageUrl);
+          if (!retryOr502()) return;
+          continue;
+        }
+        if (!full.ok) throw new Error(`upstream ${full.status}`);
+        const finalBase = full.url || target;
+        const text = await full.text();
+        // Serve-time DRM gate (select-time may have missed late key tags).
+        const drm = detectDrmManifest(text);
+        if (drm) throw new SourceError(drm);
+        if (isM3u8) {
+          res.setHeader("content-type", "application/vnd.apple.mpegurl");
+          return res.send(rewriteHlsManifest(text, finalBase));
+        }
+        res.setHeader("content-type", "application/dash+xml");
+        return res.send(rewriteDashManifest(text, finalBase));
+      }
+
+      // Direct media file: stream through with Range passthrough.
+      // NO timeout signal on the body — it would abort mid-download (that
+      // crashed the server before via an unhandled pipe error).
+      const upstream = await fetch(target, {
+        headers: {
+          "user-agent": MEDIA_UA,
+          ...(req.headers.range ? { range: req.headers.range } : {}),
+        },
+      });
+      if (upstream.status === 401 || upstream.status === 403) {
+        invalidateSource(pageUrl);
+        if (!retryOr502()) return;
+        continue;
+      }
+      if (!upstream.ok) {
+        res.status(upstream.status);
+        return res.end();
+      }
+      res.status(upstream.status);
+      for (const h of ["content-type", "content-length", "content-range", "accept-ranges"]) {
+        const v = upstream.headers.get(h);
+        if (v) res.setHeader(h, v);
+      }
+      if (!upstream.body) return res.end();
+      const stream = Readable.fromWeb(upstream.body as import("node:stream/web").ReadableStream);
+      stream.on("error", () => res.destroy()); // never crash the process
+      res.on("close", () => stream.destroy());
+      stream.pipe(res);
+      return;
+    } catch (err) {
+      if (err instanceof SourceError) {
+        // Deterministic (unsupported / DRM / sign-in) — retrying won't help.
+        if (!res.headersSent) res.status(422).json({ error: err.userMessage });
+        return;
+      }
+      if (attempt === 0) continue; // transient (timeout / reset) → one retry
+      console.error("[stream-proxy]", err);
+      if (!res.headersSent) res.status(502).json({ error: "Could not load that video." });
+      return;
+    }
+  }
+});
+
+// Playlist variants, encryption keys, init maps, and media segments for the
+// generic proxy. Public hosts only (SSRF-guarded); a 401/403 here usually
+// means a signed URL expired, so cached resolutions get dropped.
+app.get("/api/seg", async (req, res) => {
+  const check = await validateMediaUrl(String(req.query.u ?? ""));
+  if (!check.ok) return res.status(400).json({ error: check.error });
+  try {
+    const upstream = await fetch(check.url, {
+      headers: {
+        "user-agent": MEDIA_UA,
+        ...(req.headers.range ? { range: req.headers.range } : {}),
+      },
+      signal: AbortSignal.timeout(30_000),
+    });
+    if (!upstream.ok) {
+      if (upstream.status === 401 || upstream.status === 403) invalidateBySegment(check.url);
+      res.status(upstream.status);
+      return res.end();
+    }
+    const buf = Buffer.from(await upstream.arrayBuffer());
+    const head = buf.subarray(0, 24).toString("latin1").trimStart();
+    const finalBase = upstream.url || check.url;
+    if (head.startsWith("#EXTM3U")) {
+      const drm = detectDrmManifest(buf.toString("utf8"));
+      if (drm) throw new SourceError(drm);
+      res.setHeader("content-type", "application/vnd.apple.mpegurl");
+      return res.send(rewriteHlsManifest(buf.toString("utf8"), finalBase));
+    }
+    if (head.startsWith("<?xml") || head.startsWith("<MPD")) {
+      const drm = detectDrmManifest(buf.toString("utf8"));
+      if (drm) throw new SourceError(drm);
+      res.setHeader("content-type", "application/dash+xml");
+      return res.send(rewriteDashManifest(buf.toString("utf8"), finalBase));
+    }
+    res.setHeader("content-type", upstream.headers.get("content-type") ?? "application/octet-stream");
+    res.setHeader("accept-ranges", "bytes");
+    res.setHeader("content-length", String(buf.length));
+    return res.send(buf);
+  } catch (err) {
+    if (err instanceof SourceError) {
+      if (!res.headersSent) res.status(422).json({ error: err.userMessage });
+      return;
+    }
+    console.error("[stream-seg]", err);
+    if (!res.headersSent) res.status(502).end();
+  }
+});
+
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: { origin: CLIENT_ORIGIN, methods: ["GET", "POST"] },
@@ -365,7 +550,9 @@ io.on("connection", (socket) => {
     }
     // YouTube: fetch a friendly title via oEmbed (no API key). Invalid ids
     // get a clear error; network hiccups fall back to a generic title.
-    let ytTitle: string | undefined;
+    // Arbitrary links: validate (http(s), no private hosts) and resolve NOW —
+    // a failed resolve surfaces its friendly error before anything plays.
+    let titleHint: string | undefined;
     if (payload.videoId.startsWith("yt:")) {
       const ytId = payload.videoId.slice(3);
       try {
@@ -379,13 +566,29 @@ io.on("connection", (socket) => {
         }
         if (r.ok) {
           const info = (await r.json()) as { title?: string };
-          ytTitle = info.title;
+          titleHint = info.title;
         }
       } catch {
         // timeout / offline — keep going with a fallback title
       }
+    } else if (payload.videoId.startsWith("url:")) {
+      const encoded = payload.videoId.slice(4);
+      let decoded: string;
+      try {
+        decoded = decodeURIComponent(encoded);
+      } catch {
+        return emitError(socket, "movie:select", "That link is malformed.");
+      }
+      const check = await validateMediaUrl(decoded);
+      if (!check.ok) return emitError(socket, "movie:select", check.error);
+      try {
+        titleHint = (await resolveSource(check.url)).title;
+      } catch (err) {
+        const msg = err instanceof SourceError ? err.userMessage : "Couldn't resolve that link.";
+        return emitError(socket, "movie:select", msg);
+      }
     }
-    const result = manager.selectVideo(socket.id, payload.videoId, ytTitle);
+    const result = manager.selectVideo(socket.id, payload.videoId, titleHint);
     if (!result.ok) return emitError(socket, "movie:select", result.error);
     io.to(result.roomId).emit("movie:state", { playback: result.state });
     io.to(result.roomId).emit("chat:message", {

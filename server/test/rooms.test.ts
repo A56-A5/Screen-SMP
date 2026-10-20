@@ -189,3 +189,28 @@ test("private rooms are not listed publicly", () => {
   assert.equal(list.length, 1);
   assert.equal(list[0].name, "Open");
 });
+
+test("host selects an arbitrary video link (proxied playback)", () => {
+  const m = new RoomManager();
+  m.createRoom("host", { name: "R", visibility: "private", playerName: "H", appearance });
+  const encoded = encodeURIComponent("https://example.com/videos/My%20Clip.mp4");
+  const sel = m.selectVideo("host", `url:${encoded}`, "My Clip");
+  assert.ok(sel.ok);
+  if (!sel.ok) return;
+  assert.equal(sel.state.videoId, `url:${encoded}`);
+  assert.equal(sel.state.videoUrl, `/api/stream?u=${encoded}`);
+  assert.equal(sel.state.title, "My Clip");
+  assert.equal(sel.state.status, "paused");
+  assert.ok(sel.state.revision >= 1);
+});
+
+test("link selection without a title falls back, non-host rejected", () => {
+  const m = new RoomManager();
+  const room = m.createRoom("host", { name: "R", visibility: "private", playerName: "H", appearance });
+  m.joinRoom("guest", { roomId: room.roomId, playerName: "G", appearance });
+  const encoded = encodeURIComponent("https://example.com/page-with-video");
+  const sel = m.selectVideo("host", `url:${encoded}`);
+  assert.ok(sel.ok);
+  if (sel.ok) assert.equal(sel.state.title, "Video link");
+  assert.ok(!m.selectVideo("guest", `url:${encoded}`).ok);
+});

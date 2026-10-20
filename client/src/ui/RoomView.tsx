@@ -14,7 +14,7 @@ import {
   toggleLights,
 } from "../net/socket";
 import type { ChatMessage, PlaybackState, RoomState, SampleVideo, PlayerState } from "../net/types";
-import { isYouTubeSource } from "../net/youtube";
+import { classifySource } from "../net/source";
 import Hls from "hls.js";
 import { ChatPanel } from "./ChatPanel";
 import { MovieBrowser } from "./MovieBrowser";
@@ -36,6 +36,7 @@ export function RoomView({
   const gameRef = useRef<Game | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const hlsRef = useRef<Hls | null>(null);
+  const dashRef = useRef<import("dashjs").MediaPlayerClass | null>(null);
 
   const [room, setRoom] = useState<RoomState>(initialRoom);
   const [players, setPlayers] = useState<PlayerState[]>(initialRoom.players);
@@ -160,6 +161,21 @@ export function RoomView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [myId, players]);
 
+  // Catalog arrives over the socket once at connect (before this view mounts),
+  // so also pull it over REST when entering the room.
+  useEffect(() => {
+    let dead = false;
+    fetch("/api/videos")
+      .then((r) => r.json())
+      .then((p) => {
+        if (!dead && Array.isArray(p.videos)) setCatalog(p.videos);
+      })
+      .catch(() => {});
+    return () => {
+      dead = true;
+    };
+  }, []);
+
   useEffect(() => {
     gameRef.current?.syncRemoteList(players, myId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -167,8 +183,9 @@ export function RoomView({
 
   // Attach video element to 3D screen.
   // - No movie selected: ambient test live stream (muted, looping, local).
-  // - YouTube selection: live → HLS via hls.js, VOD → proxied mp4 via <video>.
-  // - Catalog movie: plain proxied URL (unchanged).
+  // - Pasted link: auto-detected — direct file via <video>, HLS via hls.js,
+  //   DASH via dash.js, unknown/proxied pages sniffed via HEAD (the server
+  //   resolves pages first, so the served content-type is authoritative).
   useEffect(() => {
     const v = videoRef.current;
     const g = gameRef.current;
@@ -179,6 +196,8 @@ export function RoomView({
     const stopMedia = () => {
       hlsRef.current?.destroy();
       hlsRef.current = null;
+      dashRef.current?.destroy();
+      dashRef.current = null;
       const el = videoRef.current;
       if (!el) return;
       el.pause();
@@ -219,13 +238,45 @@ export function RoomView({
           return;
         }
         console.warn("[hls] fatal:", data.details);
+        if (cancelled) return;
+        setToast("Stream failed to load — it may be DRM-protected, expired, or blocked. Try another link.");
+        setTimeout(() => setToast(null), 4000);
       });
       hlsRef.current = hls;
+    };
+
+    // dash.js is only pulled in when a DASH source actually plays.
+    const attachDash = async (src: string) => {
+      if (cancelled) return;
+      const { MediaPlayer } = await import("dashjs");
+      if (cancelled) return;
+      const player = MediaPlayer().create();
+      // Anything the manifest references that isn't already on our origin
+      // goes through the generic segment proxy (WebGL textures need
+      // same-origin media; the server also rewrites manifests).
+      player.addRequestInterceptor(async (req) => {
+        const u = req.url ?? "";
+        if (u && !u.startsWith("/") && !u.startsWith(window.location.origin)) {
+          req.url = `/api/seg?u=${encodeURIComponent(u)}`;
+        }
+        return req;
+      });
+      let toasted = false;
+      player.on(MediaPlayer.events.ERROR, (e) => {
+        console.warn("[dash] fatal:", e);
+        if (cancelled || toasted) return;
+        toasted = true;
+        setToast("Video failed to load — try selecting it again.");
+        setTimeout(() => setToast(null), 4000);
+      });
+      player.initialize(v, src, false);
+      dashRef.current = player;
     };
 
     const setup = async () => {
       const url = playback.videoUrl;
       if (!url) {
+        // Ambient no-movie stream: known HLS, muted + looping.
         const src = `/api/youtube/stream?videoId=${TEST_YT_VIDEO_ID}`;
         v.loop = true;
         v.muted = true;
@@ -236,21 +287,37 @@ export function RoomView({
       }
       v.loop = false;
       v.muted = false;
-      if (isYouTubeSource(url)) {
-        try {
-          const head = await fetch(url, { method: "HEAD" });
-          if (cancelled) return;
-          const ct = head.headers.get("content-type") ?? "";
-          if (ct.includes("mpegurl") && Hls.isSupported()) {
-            attachHls(url);
-          } else {
-            v.src = url; // VOD: direct media through the proxy
-          }
-        } catch {
-          if (!cancelled) v.src = url;
-        }
-      } else {
+
+      const kind = classifySource(url);
+      if (kind === "hls") {
+        if (Hls.isSupported()) attachHls(url);
+        else v.src = url; // Safari: native HLS
+        return;
+      }
+      if (kind === "dash") {
+        await attachDash(url);
+        return;
+      }
+      if (kind === "direct") {
         v.src = url;
+        return;
+      }
+      // Unknown or proxied page link: sniff what the server actually serves.
+      // The proxy resolves pages first, so its content-type is authoritative.
+      try {
+        const head = await fetch(url, { method: "HEAD" });
+        if (cancelled) return;
+        const ct = (head.headers.get("content-type") ?? "").toLowerCase();
+        if (ct.includes("mpegurl")) {
+          if (Hls.isSupported()) attachHls(url);
+          else v.src = url; // Safari: native HLS
+        } else if (ct.includes("dash+xml")) {
+          await attachDash(url);
+        } else {
+          v.src = url;
+        }
+      } catch {
+        if (!cancelled) v.src = url;
       }
       // Play/pause is governed by the sync effect below.
     };
@@ -367,6 +434,14 @@ export function RoomView({
   const handlePlayYouTube = useCallback((ytId: string) => {
     selectVideo(`yt:${ytId}`);
     setPendingAutoPlay(`yt:${ytId}`);
+  }, []);
+
+  // Arbitrary link: server validates + resolves it (yt-dlp / Vimeo config),
+  // then every client streams it through the same proxy pipeline.
+  const handlePlayUrl = useCallback((url: string) => {
+    const id = `url:${encodeURIComponent(url)}`;
+    selectVideo(id);
+    setPendingAutoPlay(id);
   }, []);
 
   // Speaking indicator via mic level
@@ -608,6 +683,7 @@ export function RoomView({
             setShowBrowser(true);
           }}
           onPlayYouTube={handlePlayYouTube}
+          onPlayUrl={handlePlayUrl}
           onClose={() => setShowSettings(false)}
           onToast={(m) => {
             setToast(m);

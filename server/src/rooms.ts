@@ -11,34 +11,44 @@ import type {
   Visibility,
 } from "./types.js";
 
-// Openly licensed sample videos (Blender Foundation / public sources).
-// These are real, playable, CORS-friendly URLs.
+// Openly licensed sample videos (Blender Foundation via archive.org).
+// Served through the generic proxy: same-origin (no CORS needed for WebGL
+// textures) and resilient to upstream host changes. The old
+// commondatastorage.googleapis.com bucket now returns AccessDenied.
 export const SAMPLE_VIDEOS: SampleVideo[] = [
   {
     id: "big-buck-bunny",
     title: "Big Buck Bunny",
-    url: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4",
+    url: `/api/stream?u=${encodeURIComponent(
+      "https://archive.org/download/BigBuckBunny_124/Content/big_buck_bunny_720p_surround.mp4"
+    )}`,
     duration: 596,
     attribution: "Blender Foundation — Creative Commons Attribution 3.0",
   },
   {
     id: "elephants-dream",
     title: "Elephants Dream",
-    url: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4",
+    url: `/api/stream?u=${encodeURIComponent(
+      "https://archive.org/download/ElephantsDream/ed_1024_512kb.mp4"
+    )}`,
     duration: 653,
     attribution: "Blender Foundation — Creative Commons Attribution 2.5",
   },
   {
     id: "sintel",
     title: "Sintel",
-    url: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4",
+    url: `/api/stream?u=${encodeURIComponent(
+      "https://archive.org/download/Sintel/sintel-2048-surround_512kb.mp4"
+    )}`,
     duration: 888,
     attribution: "Blender Foundation — Creative Commons Attribution 3.0",
   },
   {
     id: "tears-of-steel",
     title: "Tears of Steel",
-    url: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4",
+    url: `/api/stream?u=${encodeURIComponent(
+      "https://archive.org/download/Tears-of-Steel/tears_of_steel_720p.mp4"
+    )}`,
     duration: 734,
     attribution: "Blender Foundation — Creative Commons Attribution 3.0",
   },
@@ -300,13 +310,14 @@ export class RoomManager {
   selectVideo(
     socketId: string,
     videoId: string,
-    ytTitle?: string
+    titleHint?: string
   ): { ok: true; state: PlaybackState; roomId: string; title: string } | { ok: false; error: string } {
     const roomId = this.playerRoom.get(socketId);
     if (!roomId) return { ok: false, error: "You are not in a room." };
     const room = this.rooms.get(roomId);
     if (!room) return { ok: false, error: "Room not found." };
     if (room.hostId !== socketId) return { ok: false, error: "Only the host can change the video." };
+    if (videoId.length > 4096) return { ok: false, error: "That selection is too long." };
 
     let id: string;
     let url: string;
@@ -325,7 +336,13 @@ export class RoomManager {
       }
       id = `yt:${ytId}`;
       url = `/api/youtube/stream?videoId=${ytId}`;
-      title = ytTitle?.trim() || `YouTube · ${ytId}`;
+      title = titleHint?.trim() || `YouTube · ${ytId}`;
+    } else if (videoId.startsWith("url:")) {
+      // Arbitrary link: already validated + resolved by the caller; streams
+      // through the generic proxy (which re-resolves on expired signatures).
+      id = videoId;
+      url = `/api/stream?u=${videoId.slice(4)}`;
+      title = titleHint?.trim() || "Video link";
     } else {
       return { ok: false, error: "Unknown video." };
     }
