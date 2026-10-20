@@ -530,6 +530,9 @@ export class Game {
 
     if (this.sitting && this.seatPos) {
       pos.lerp(this.seatPos, Math.min(1, dt * 10));
+      // Seated players still turn with the look direction (Minecraft stairs
+      // behavior) — remotes pick it up via rotationY in the move broadcast.
+      this.localChar.root.rotation.y = this.yaw + Math.PI;
       this.localChar.setMoving(false);
       this.localChar.setJumping(false);
       this.localChar.setCrouching(false);
@@ -676,6 +679,12 @@ export class Game {
 
     this.moveAndCollide(dt);
     this.localChar.update(dt);
+    if (this.sitting) {
+      // Head tilts up/down with the camera while seated. The sitting branch
+      // of character.update returns before the standing head-decay, so this
+      // assignment sticks; standing eases it back to level.
+      this.localChar.head.rotation.x = -this.pitch * 0.6;
+    }
 
     const p = this.localChar.root.position;
     const eye = EYE_HEIGHT - (this.crouching && !this.sitting ? CROUCH_EYE_DROP : 0);
@@ -711,7 +720,8 @@ export class Game {
           this.fpHand.position.z = -0.7;
           this.fpHand.rotation.x = -0.4;
         }
-        this.fpHand.visible = !this.sitting;
+        // Keep the hand visible while seated so the punch jab still plays.
+        this.fpHand.visible = true;
       }
     } else {
       // Third-person orbit camera behind the player.
