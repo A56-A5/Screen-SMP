@@ -106,8 +106,9 @@ export function buildWorld(): WorldResult {
   group.add(ground);
   groundGeo.dispose();
 
-  // Path from spawn to the cinema door (stone bricks, 1 block wide, thin slab)
-  for (let z = 12; z >= -2; z--) {
+  // Path from spawn to the cinema door (stone bricks, 1 block wide, thin
+  // slab) — runs flush into the threshold at z-3 (odd count to the door).
+  for (let z = 12; z >= -3; z--) {
     const p = block(1, 0.1, 1, mats.stoneBrick);
     p.position.set(0.5, 0.05, z + 0.5);
     group.add(p);
