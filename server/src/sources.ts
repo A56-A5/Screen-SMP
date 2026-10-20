@@ -255,12 +255,42 @@ export function detectDrmManifest(text: string): string | null {
   return null;
 }
 
-async function fetchManifestText(url: string): Promise<string> {
+/** `<origin>/` for absolute http(s) URLs — a sensible hotlink Referer. */
+export function pageReferer(pageUrl: string): string | undefined {
+  try {
+    const u = new URL(pageUrl);
+    if (u.protocol === "http:" || u.protocol === "https:") return `${u.origin}/`;
+  } catch {
+    // not a URL — no referer
+  }
+  return undefined;
+}
+
+/**
+ * Fetch upstream, retrying once with `referer` when the plain request fails:
+ * some handoff CDNs answer 500/403 to hotlinks that arrive without one.
+ * Plain-first keeps referer-sensitive hosts that already worked unchanged.
+ */
+export async function fetchWithReferer(
+  url: string,
+  init: RequestInit & { referer?: string }
+): Promise<Response> {
+  const { referer, ...rest } = init;
+  let r = await fetch(url, rest);
+  if (r.ok || !referer) return r;
+  await r.body?.cancel().catch(() => {});
+  const headers = new Headers(rest.headers);
+  headers.set("referer", referer);
+  return fetch(url, { ...rest, headers });
+}
+
+async function fetchManifestText(url: string, referer?: string): Promise<string> {
   let r: Response;
   try {
-    r = await fetch(url, {
+    r = await fetchWithReferer(url, {
       headers: { "user-agent": MEDIA_UA },
       signal: AbortSignal.timeout(12_000),
+      referer,
     });
   } catch {
     throw new SourceError("Couldn't load that stream's playlist — the link may be dead.");
@@ -289,14 +319,15 @@ function firstVariantUrl(manifestText: string, baseUrl: string): string | null {
  * an unreadable playlist so `movie:select` can fail with a friendly toast.
  */
 async function assertPlayableManifest(pageUrl: string, kind: "hls" | "dash"): Promise<void> {
-  const text = await fetchManifestText(pageUrl);
+  const referer = pageReferer(pageUrl);
+  const text = await fetchManifestText(pageUrl, referer);
   let drm = detectDrmManifest(text);
   if (!drm && kind === "hls") {
     const variant = firstVariantUrl(text, pageUrl);
     if (variant) {
       try {
         if (await isPublicHost(new URL(variant).hostname)) {
-          const vt = await fetchManifestText(variant).catch(() => null);
+          const vt = await fetchManifestText(variant, referer).catch(() => null);
           drm = vt ? detectDrmManifest(vt) : null;
         }
       } catch {
@@ -436,7 +467,70 @@ async function resolveVimeo(pageUrl: string): Promise<Resolved> {
   throw new SourceError("That Vimeo video has no playable stream.");
 }
 
-async function resolveYtdlp(pageUrl: string): Promise<Resolved> {
+/** Property/name attribute value from the first matching <meta> tag. */
+function metaTagValue(html: string, prop: string): string | null {
+  const re = new RegExp(
+    `<meta[^>]+(?:property|name)=["']${prop}["'][^>]+content=["']([^"']+)["']` +
+      `|<meta[^>]+content=["']([^"']+)["'][^>]+(?:property|name)=["']${prop}["']`,
+    "i"
+  );
+  const m = re.exec(html);
+  return (m && (m[1] || m[2])) || null;
+}
+
+const AD_EMBED =
+  /doubleclick|googlesyndication|adservice|adnxs|taboola|outbrain|scorecardresearch|facebook\.net/i;
+
+interface EmbedCandidate {
+  url: string;
+  title?: string;
+}
+
+/**
+ * Watch pages that only embed their player in an iframe (animegg-style sites)
+ * read as "Unsupported URL" to yt-dlp. Scrape the page for og:video and
+ * player iframes so those links still resolve; ads are skipped and every
+ * candidate is SSRF-checked. Returns at most 3 candidates, best first.
+ */
+async function discoverEmbedCandidates(pageUrl: string): Promise<EmbedCandidate[]> {
+  let html: string;
+  try {
+    const r = await fetch(pageUrl, {
+      headers: { "user-agent": MEDIA_UA },
+      signal: AbortSignal.timeout(12_000),
+    });
+    if (!r.ok) return [];
+    html = (await r.text()).slice(0, 1_000_000);
+  } catch {
+    return [];
+  }
+  const ogTitle = metaTagValue(html, "og:title") ?? undefined;
+  const ogVideo =
+    metaTagValue(html, "og:video:secure_url") ??
+    metaTagValue(html, "og:video:url") ??
+    metaTagValue(html, "og:video");
+  const raws: string[] = ogVideo ? [ogVideo] : [];
+  for (const m of html.matchAll(/<iframe[^>]+src=["']([^"']+)["']/gi)) raws.push(m[1]);
+
+  const out: EmbedCandidate[] = [];
+  for (const raw of raws) {
+    if (out.length >= 3) break;
+    const t = raw.trim();
+    if (!t || /^(javascript|about|data):/i.test(t) || AD_EMBED.test(t)) continue;
+    let abs: string;
+    try {
+      abs = new URL(t, pageUrl).toString();
+    } catch {
+      continue;
+    }
+    const v = await validateMediaUrl(abs);
+    if (!v.ok || out.some((c) => c.url === v.url)) continue;
+    out.push({ url: v.url, title: ogTitle });
+  }
+  return out;
+}
+
+async function resolveYtdlp(pageUrl: string, depth = 0): Promise<Resolved> {
   let stdout: string;
   try {
     const r = await execFileP(
@@ -450,6 +544,21 @@ async function resolveYtdlp(pageUrl: string): Promise<Resolved> {
     const stderr = String(e.stderr ?? "");
     if (e.killed || e.code === "ETIMEDOUT" || /timed out|timeout/i.test(stderr)) {
       throw new SourceError("Looking up that link took too long.");
+    }
+    if (depth === 0 && /unsupported url/i.test(stderr)) {
+      // Page URL with the player behind an og:video tag or an iframe:
+      // try each embed directly (one level only — embeds don't nest).
+      for (const cand of await discoverEmbedCandidates(pageUrl)) {
+        const k = classifyUrl(cand.url);
+        if (k === "direct" || k === "hls" || k === "dash") {
+          return { title: (cand.title || titleFromUrl(cand.url)).slice(0, 120), mediaUrl: cand.url };
+        }
+        try {
+          return k === "vimeo" ? await resolveVimeo(cand.url) : await resolveYtdlp(cand.url, depth + 1);
+        } catch {
+          // Not the player — try the next embed.
+        }
+      }
     }
     throw new SourceError(mapYtdlpError(stderr || String(err)));
   }

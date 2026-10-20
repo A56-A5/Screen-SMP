@@ -182,7 +182,8 @@ export function RoomView({
   }, [myId]);
 
   // Attach video element to 3D screen.
-  // - No movie selected: ambient test live stream (muted, looping, local).
+  // - No movie selected: ambient test live stream (looping, local; plays
+  //    with sound, falling back to muted if autoplay blocks it).
   // - Pasted link: auto-detected — direct file via <video>, HLS via hls.js,
   //   DASH via dash.js, unknown/proxied pages sniffed via HEAD (the server
   //   resolves pages first, so the served content-type is authoritative).
@@ -276,13 +277,18 @@ export function RoomView({
     const setup = async () => {
       const url = playback.videoUrl;
       if (!url) {
-        // Ambient no-movie stream: known HLS, muted + looping.
+        // Ambient no-movie stream: known HLS, looping. Try with sound (lofi
+        // radio); browsers that block unmuted autoplay fall back to muted.
         const src = `/api/youtube/stream?videoId=${TEST_YT_VIDEO_ID}`;
         v.loop = true;
-        v.muted = true;
+        v.muted = false;
         if (Hls.isSupported()) attachHls(src);
         else v.src = src; // Safari: native HLS
-        v.play().catch(() => {});
+        v.play().catch(() => {
+          if (cancelled) return;
+          v.muted = true;
+          v.play().catch(() => {});
+        });
         return;
       }
       v.loop = false;

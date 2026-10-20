@@ -10,8 +10,10 @@ import {
   SourceError,
   classifyUrl,
   detectDrmManifest,
+  fetchWithReferer,
   invalidateBySegment,
   invalidateSource,
+  pageReferer,
   rewriteDashManifest,
   rewriteHlsManifest,
   resolveSource,
@@ -267,9 +269,10 @@ app.get("/api/stream", async (req, res) => {
 
       // Sniff with a tiny ranged GET (first chunk only) — never buffer whole
       // media files; playlists/manifests get fully fetched below instead.
-      const sniff = await fetch(target, {
+      const sniff = await fetchWithReferer(target, {
         headers: { "user-agent": MEDIA_UA, range: "bytes=0-63" },
         signal: AbortSignal.timeout(20_000),
+        referer: pageReferer(pageUrl),
       });
       if (sniff.status === 401 || sniff.status === 403) {
         invalidateSource(pageUrl);
@@ -299,9 +302,10 @@ app.get("/api/stream", async (req, res) => {
       }
 
       if (isM3u8 || isMpd) {
-        const full = await fetch(target, {
+        const full = await fetchWithReferer(target, {
           headers: { "user-agent": MEDIA_UA },
           signal: AbortSignal.timeout(30_000),
+          referer: pageReferer(pageUrl),
         });
         if (full.status === 401 || full.status === 403) {
           invalidateSource(pageUrl);
@@ -325,11 +329,12 @@ app.get("/api/stream", async (req, res) => {
       // Direct media file: stream through with Range passthrough.
       // NO timeout signal on the body — it would abort mid-download (that
       // crashed the server before via an unhandled pipe error).
-      const upstream = await fetch(target, {
+      const upstream = await fetchWithReferer(target, {
         headers: {
           "user-agent": MEDIA_UA,
           ...(req.headers.range ? { range: req.headers.range } : {}),
         },
+        referer: pageReferer(pageUrl),
       });
       if (upstream.status === 401 || upstream.status === 403) {
         invalidateSource(pageUrl);

@@ -4,6 +4,7 @@ import {
   classifyUrl,
   detectDrmManifest,
   mapYtdlpError,
+  pageReferer,
   rewriteDashManifest,
   rewriteHlsManifest,
   titleFromUrl,
@@ -87,6 +88,13 @@ test("mapYtdlpError turns stderr into actionable messages", () => {
   assert.match(mapYtdlpError("ERROR: Video unavailable"), /unavailable/i);
   assert.match(mapYtdlpError("HTTP Error 403: Forbidden"), /download|blocked|resolve/i);
   assert.match(mapYtdlpError("some unexplained failure"), /resolve/i);
+});
+
+test("pageReferer derives the page origin for hotlink-sensitive hosts", () => {
+  assert.equal(pageReferer("https://www.animegg.org/barakamon-episode-7"), "https://www.animegg.org/");
+  assert.equal(pageReferer("http://example.com:8080/watch?v=1"), "http://example.com:8080/");
+  assert.equal(pageReferer("not a url"), undefined);
+  assert.equal(pageReferer("ftp://example.com/f"), undefined);
 });
 
 test("toProxyUrl resolves relative URLs and never re-proxies ours", () => {
