@@ -10,6 +10,11 @@ Grab a room code, walk into the theatre, claim a red seat, punch your buddy in t
 kill the lights, and watch. No accounts, no installs — it's a website.
 
 <p align="center">
+  <a href="https://screen-smp.onrender.com/"><strong>▶ Play now → screen-smp.onrender.com</strong></a>
+  <br><sub>Live demo — hosted on Render. Open it, create a room, send the code to a friend.</sub>
+</p>
+
+<p align="center">
   <img src="docs/screenshots/exterior.jpg" alt="Two blocky players outside the theatre" width="820">
   <br><sub>You and Alex, outside the theatre. Room code's in the corner — send it to a friend.</sub>
 </p>
@@ -82,7 +87,8 @@ docker run -p 4000:4000 screen-smp
 
 One process, one port — the server serves the built client, so there's no CORS to
 configure. Point a host at it (there's a `render.yaml` for Render, and the image runs
-anywhere that takes a Dockerfile) and share the URL.
+anywhere that takes a Dockerfile) and share the URL. The official one lives at
+[screen-smp.onrender.com](https://screen-smp.onrender.com/) — every push to `main` redeploys it.
 
 ### Environment
 
