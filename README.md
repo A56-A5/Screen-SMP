@@ -93,6 +93,7 @@ Defaults work for local dev. `.env.example` has the full list.
 | `PORT` | `4000` | Game server port |
 | `CLIENT_ORIGIN` | `http://localhost:5173` | Allowed browser origins (comma-separated in prod; leave unset to reflect everything) |
 | `VITE_SOCKET_URL` | `/` (same origin) | Socket URL baked into the client build (only needed if client & server are on different origins) |
+| `YOUTUBE_COOKIES_B64` | unset | Optional — base64 of a Netscape `cookies.txt` from a logged-in YouTube session. Only needed if YouTube bot-checks your server's IP ("Sign in to confirm you're not a bot"); the image already ships a PO-token provider for the usual case. `base64 -w0 cookies.txt` to encode. |
 
 ## Tech
 

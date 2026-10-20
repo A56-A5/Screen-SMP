@@ -1,9 +1,28 @@
 import { execFile } from "node:child_process";
 import { lookup } from "node:dns/promises";
+import fs from "node:fs";
 import net from "node:net";
 import { promisify } from "node:util";
 
 const execFileP = promisify(execFile);
+
+/**
+ * Optional Netscape cookies file for yt-dlp (base64 in YOUTUBE_COOKIES_B64) —
+ * the official answer when YouTube hard bot-checks an IP. Written once at
+ * startup; both yt-dlp resolvers pass it when present.
+ */
+export const ytCookiesFile: string | undefined = (() => {
+  const b64 = process.env.YOUTUBE_COOKIES_B64;
+  if (!b64) return undefined;
+  try {
+    const file = "/tmp/yt-cookies.txt";
+    fs.writeFileSync(file, Buffer.from(b64, "base64"));
+    return file;
+  } catch (err) {
+    console.error("[sources] could not write cookies file:", err);
+    return undefined;
+  }
+})();
 
 /** Browser-ish UA for upstream media requests (some CDNs reject others). */
 export const MEDIA_UA =
@@ -533,24 +552,24 @@ async function discoverEmbedCandidates(pageUrl: string): Promise<EmbedCandidate[
 async function resolveYtdlp(pageUrl: string, depth = 0): Promise<Resolved> {
   let stdout: string;
   try {
-    const r = await execFileP(
-      "yt-dlp",
-      [
-        // youtube: prefix is ignored by every other extractor; for YouTube
-        // it forces the progressive-mp4 client (see resolveYouTube in index.ts).
-        "--extractor-args",
-        "youtube:player_client=web_embedded",
-        "--no-playlist",
-        "--no-warnings",
-        "-f",
-        "b",
-        "--get-title",
-        "--get-url",
-        "--",
-        pageUrl,
-      ],
-      { timeout: 45_000, maxBuffer: 4 << 20 }
+    const args = [
+      // youtube: prefix is ignored by every other extractor; for YouTube
+      // it forces the progressive-mp4 client (see resolveYouTube in index.ts).
+      "--extractor-args",
+      "youtube:player_client=web_embedded",
+    ];
+    if (ytCookiesFile) args.push("--cookies", ytCookiesFile);
+    args.push(
+      "--no-playlist",
+      "--no-warnings",
+      "-f",
+      "b",
+      "--get-title",
+      "--get-url",
+      "--",
+      pageUrl
     );
+    const r = await execFileP("yt-dlp", args, { timeout: 45_000, maxBuffer: 4 << 20 });
     stdout = r.stdout;
   } catch (err) {
     const e = err as { stderr?: string; killed?: boolean; code?: string | number };

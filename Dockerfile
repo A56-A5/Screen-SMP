@@ -9,13 +9,26 @@ COPY . .
 RUN npm run build
 
 # Runtime: node + yt-dlp + Deno (yt-dlp's default JS runtime for YouTube's
-# challenge scripts) + bundled EJS components (no runtime fetches needed).
+# challenge scripts) + bundled EJS components (no runtime fetches needed) +
+# the bgutil PO-Token provider (yt-dlp plugin via pip + its HTTP server at
+# /opt/bgutil) — YouTube bot-checks datacenter IPs without a PO token.
 FROM node:24-bookworm-slim
 RUN apt-get update \
  && apt-get install -y --no-install-recommends python3 python3-pip ca-certificates curl unzip \
  && rm -rf /var/lib/apt/lists/* \
  && curl -fsSL https://deno.land/install.sh | DENO_INSTALL=/usr/local sh -s -- -y \
  && pip3 install --no-cache-dir --break-system-packages -U yt-dlp yt-dlp-ejs \
+      bgutil-ytdlp-pot-provider==2.0.2 \
+ && curl -fsSL https://github.com/Brainicism/bgutil-ytdlp-pot-provider/archive/refs/tags/2.0.2.tar.gz \
+      -o /tmp/bgutil.tar.gz \
+ && mkdir -p /opt \
+ && tar -xzf /tmp/bgutil.tar.gz -C /opt \
+ && mv /opt/bgutil-ytdlp-pot-provider-2.0.2 /opt/bgutil \
+ && rm /tmp/bgutil.tar.gz \
+ && cd /opt/bgutil/server \
+ && npm ci --no-audit --no-fund \
+ && npx tsc \
+ && npm prune --omit=dev \
  && deno --version \
  && yt-dlp --version
 WORKDIR /app

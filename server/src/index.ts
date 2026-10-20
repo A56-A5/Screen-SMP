@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { Readable } from "node:stream";
@@ -21,6 +21,7 @@ import {
   rewriteHlsManifest,
   resolveSource,
   validateMediaUrl,
+  ytCookiesFile,
 } from "./sources.js";
 import type {
   Appearance,
@@ -76,33 +77,41 @@ app.get("/api/videos", (_req, res) => {
 const execFileP = promisify(execFile);
 const YT_UA =
   "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36";
+
+// Optional yt-dlp cookies come from sources.ts (YOUTUBE_COOKIES_B64 env) —
+// the official answer when an IP is hard bot-checked.
+
+// bgutil PO-Token server (bundled in the Docker image) — generates the tokens
+// YouTube demands from datacenter IPs ("Sign in to confirm you're not a bot").
+// No-op on dev machines, which already run their own yt-dlp POT plugin.
+const BGUTIL_MAIN = process.env.BGUTIL_MAIN ?? "/opt/bgutil/server/build/main.js";
+let bgutilProc: ReturnType<typeof spawn> | undefined;
+if (process.env.BGUTIL_DISABLED !== "1" && fs.existsSync(BGUTIL_MAIN)) {
+  bgutilProc = spawn(process.execPath, [BGUTIL_MAIN], { stdio: "ignore" });
+  bgutilProc.on("error", (err) => console.error("[bgutil] failed to start:", err.message));
+  bgutilProc.on("exit", (code) => console.error(`[bgutil] exited (code ${code})`));
+}
+
 const ytUrlCache = new Map<string, { url: string; expires: number }>();
 const YT_URL_TTL = 30 * 60 * 1000;
-// Two clients, tried in order via the handler's retry loop:
-//  - web_embedded: progressive MP4 (itag 18: video+audio in one file), the
-//    proven path for normal videos — no PO token needed.
+// Clients tried in order via the handler's retry loop:
+//  - web_embedded: progressive MP4 (itag 18: video+audio in one file) with no
+//    PO token — fast path for normal videos on unflagged IPs.
+//  - web + PO token (bgutil): survives datacenter-IP bot checks that reject
+//    every anonymous request ("Sign in to confirm you're not a bot").
 //  - android: fallback for videos with embedding DISABLED — their embedded
-//    URLs are issued fine but every fetch 403s (sefc enforcement). The
-//    android client serves the same progressive MP4 unrestricted.
-type YTClient = "web_embedded" | "android";
+//    URLs are issued fine but every fetch 403s (sefc enforcement).
+const YT_CLIENTS = ["web_embedded", "web", "android"] as const;
+type YTClient = (typeof YT_CLIENTS)[number];
 
 async function resolveYouTube(videoId: string, client: YTClient): Promise<string> {
   const cached = ytUrlCache.get(videoId);
   if (cached && cached.expires > Date.now()) return cached.url;
-  const { stdout } = await execFileP(
-    "yt-dlp",
-    [
-      "--extractor-args",
-      `youtube:player_client=${client}`,
-      "-g",
-      "-f",
-      "b",
-      "--no-playlist",
-      "--",
-      `https://www.youtube.com/watch?v=${videoId}`,
-    ],
-    { timeout: 30_000, maxBuffer: 1 << 20 }
-  );
+  const args: string[] = ["--extractor-args", `youtube:player_client=${client}`];
+  if (ytCookiesFile) args.push("--cookies", ytCookiesFile);
+  args.push("-g", "-f", "b", "--no-playlist", "--", `https://www.youtube.com/watch?v=${videoId}`);
+  // 60s: the web+PO-token path generates a token first (a few seconds).
+  const { stdout } = await execFileP("yt-dlp", args, { timeout: 60_000, maxBuffer: 1 << 20 });
   const url = stdout.trim().split("\n")[0];
   if (!url?.startsWith("http")) throw new Error("yt-dlp returned no URL");
   // Respect YouTube's own expire/<unix> stamp — never cache past it.
@@ -152,11 +161,12 @@ app.get("/api/youtube/stream", async (req, res) => {
   if (!/^[A-Za-z0-9_-]{5,20}$/.test(videoId)) {
     return res.status(400).json({ error: "Invalid videoId." });
   }
-  for (let attempt = 0; attempt < 2; attempt++) {
-    // Attempt 0 = embedded (fast path); attempt 1 = android. Every failure
-    // mode below (yt-dlp error, 401/403 sniff, upstream reset) falls through
-    // to the next attempt, so embed-restricted videos land on android.
-    const client: YTClient = attempt === 0 ? "web_embedded" : "android";
+  for (let attempt = 0; attempt < YT_CLIENTS.length; attempt++) {
+    // Failures below (yt-dlp error, 401/403 sniff, upstream reset) fall
+    // through to the next client: bot-checked IPs land on web+PO-token,
+    // embed-restricted videos land on android.
+    const client = YT_CLIENTS[attempt];
+    const lastAttempt = attempt === YT_CLIENTS.length - 1;
     try {
       const url = await resolveYouTube(videoId, client);
       // Sniff with a tiny ranged GET (read first chunk only, then cancel) —
@@ -167,7 +177,7 @@ app.get("/api/youtube/stream", async (req, res) => {
       });
       if (isExpiredStatus(sniff.status)) {
         ytUrlCache.delete(videoId);
-        if (attempt === 0) continue; // re-resolve with a fresh signature
+        if (!lastAttempt) continue; // re-resolve with a fresh signature
         return res.status(502).json({ error: "YouTube rejected the stream. Re-select the video." });
       }
       if (!sniff.ok) throw new Error(`upstream ${sniff.status}`);
@@ -200,7 +210,7 @@ app.get("/api/youtube/stream", async (req, res) => {
         const full = await fetch(url, { headers: { "user-agent": YT_UA }, signal: AbortSignal.timeout(20_000) });
         if (isExpiredStatus(full.status)) {
           ytUrlCache.delete(videoId);
-          if (attempt === 0) continue;
+          if (!lastAttempt) continue;
           return res.status(502).json({ error: "YouTube rejected the stream. Re-select the video." });
         }
         if (!full.ok) throw new Error(`upstream ${full.status}`);
@@ -217,7 +227,7 @@ app.get("/api/youtube/stream", async (req, res) => {
       });
       if (isExpiredStatus(upstream.status)) {
         ytUrlCache.delete(videoId);
-        if (attempt === 0) continue;
+        if (!lastAttempt) continue;
         return res.status(502).json({ error: "YouTube rejected the stream. Re-select the video." });
       }
       if (!upstream.ok) {
@@ -236,9 +246,17 @@ app.get("/api/youtube/stream", async (req, res) => {
       stream.pipe(res);
       return;
     } catch (err) {
-      if (attempt === 0) continue; // transient (timeout / reset) → one retry
+      if (!lastAttempt) continue; // transient → try the next client
       console.error("[youtube-proxy]", err);
-      if (!res.headersSent) res.status(502).json({ error: "Could not resolve YouTube stream." });
+      const stderr = String((err as { stderr?: string }).stderr ?? "");
+      const botCheck = /not a bot|Sign in to confirm/i.test(stderr);
+      if (!res.headersSent) {
+        res.status(502).json({
+          error: botCheck
+            ? "YouTube is bot-checking this server's IP. Set YOUTUBE_COOKIES_B64 (see README) or try again later."
+            : "Could not resolve YouTube stream.",
+        });
+      }
       return;
     }
   }
@@ -745,6 +763,7 @@ server.listen(PORT, () => {
 // Always release the port on Ctrl-C / SIGTERM — no lingering listeners.
 function shutdown(signal: string): void {
   console.log(`[cinevox] ${signal} — closing server`);
+  bgutilProc?.kill();
   io.close();
   server.close(() => process.exit(0));
   setTimeout(() => process.exit(0), 1500).unref();
