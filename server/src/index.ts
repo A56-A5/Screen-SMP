@@ -1,5 +1,8 @@
+import fs from "node:fs";
 import http from "node:http";
+import path from "node:path";
 import { execFile } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { Readable } from "node:stream";
 import express from "express";
@@ -31,9 +34,34 @@ import type {
 } from "./types.js";
 
 const PORT = Number(process.env.PORT ?? 4000);
-const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN ?? "http://localhost:5173";
+const CLIENT_ORIGIN = (
+  process.env.CLIENT_ORIGIN ??
+  (process.env.NODE_ENV === "production" ? "" : "http://localhost:5173")
+)
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
 
 const app = express();
+
+// Cross-origin API/media access only matters when the client is hosted
+// elsewhere (CLIENT_ORIGIN set). Same-origin deploys — we serve the built
+// client ourselves below — never send a foreign Origin, so this is skipped.
+if (CLIENT_ORIGIN.length) {
+  const allowAll = CLIENT_ORIGIN.includes("*");
+  app.use((req, res, next) => {
+    const origin = req.headers.origin;
+    if (origin && (allowAll || CLIENT_ORIGIN.includes(origin))) {
+      res.setHeader("access-control-allow-origin", allowAll ? "*" : origin);
+      res.setHeader("vary", "Origin");
+      res.setHeader("access-control-allow-methods", "GET,HEAD,POST,OPTIONS");
+      res.setHeader("access-control-allow-headers", "content-type,range");
+      res.setHeader("access-control-expose-headers", "content-range,content-length,accept-ranges");
+    }
+    if (req.method === "OPTIONS") return res.sendStatus(204);
+    next();
+  });
+}
 app.get("/health", (_req, res) => {
   res.json({ ok: true, rooms: manager.listPublicRooms().length });
 });
@@ -420,8 +448,10 @@ app.get("/api/seg", async (req, res) => {
 
 const server = http.createServer(app);
 const io = new Server(server, {
-  cors: { origin: CLIENT_ORIGIN, methods: ["GET", "POST"] },
-  maxHttpBufferSize: 1e5, // 100 KB
+  // Empty CLIENT_ORIGIN in production (same-origin deploy) → reflect the
+  // requester; dev pins to Vite; split deploys pin via the env.
+  cors: { origin: CLIENT_ORIGIN.length ? CLIENT_ORIGIN : true, methods: ["GET", "POST"] },
+  maxHttpBufferSize: 1e5, // chat/move payloads only — never file uploads
 });
 
 const manager = new RoomManager();
@@ -656,6 +686,24 @@ io.on("connection", (socket) => {
   }
 });
 
+// --- Single-origin hosting: serve the built client when it exists ---
+// Dev keeps using Vite on :5173; in production (Docker, VPS, Render) this
+// same server hands out index.html + hashed assets, so /api and Socket.IO
+// are same-origin — no CORS, no separate static host.
+const here = path.dirname(fileURLToPath(import.meta.url));
+const clientDist = path.resolve(here, "../../client/dist");
+const indexHtml = path.join(clientDist, "index.html");
+if (fs.existsSync(indexHtml)) {
+  app.use(express.static(clientDist, { index: false, maxAge: "1h" }));
+  // SPA fallback: any other GET (not /api, not Socket.IO) gets the app shell.
+  app.use((req, res, next) => {
+    if (req.method !== "GET" || req.path.startsWith("/api/")) return next();
+    res.setHeader("cache-control", "no-cache");
+    res.sendFile(indexHtml);
+  });
+  console.log(`[cinevox] serving client from ${clientDist}`);
+}
+
 server.on("error", (err: NodeJS.ErrnoException) => {
   if (err.code === "EADDRINUSE") {
     console.error(
@@ -670,7 +718,8 @@ server.on("error", (err: NodeJS.ErrnoException) => {
 });
 
 server.listen(PORT, () => {
-  console.log(`[cinevox] server listening on :${PORT} (cors: ${CLIENT_ORIGIN})`);
+  const corsLabel = CLIENT_ORIGIN.length ? CLIENT_ORIGIN.join(",") : "reflect (same-origin)";
+  console.log(`[cinevox] server listening on :${PORT} (cors: ${corsLabel})`);
 });
 
 // Always release the port on Ctrl-C / SIGTERM — no lingering listeners.

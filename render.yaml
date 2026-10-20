@@ -1,0 +1,10 @@
+# Render one-click config: Docker runtime, free plan, health-checked.
+services:
+  - type: web
+    name: screensmp
+    runtime: docker
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
