@@ -1,154 +1,127 @@
-# Screen SMP — Minecraft-style Multiplayer Watch Party (MVP)
+<p align="center">
+  <img src="docs/screenshots/landing.jpg" alt="Screen SMP landing page" width="820">
+</p>
 
-A voxel 3D world where friends gather as blocky characters, walk around a cinema,
-sit in seats, chat, and watch open-license movies together with server-synced playback.
+# Screen SMP
 
-## Stack
+**A Minecraft-style voxel world where your friends actually show up — and the movie plays for everyone, in sync.**
 
-| Layer    | Tech |
-|----------|------|
-| Client   | Vite + React 18 + TypeScript + Three.js + socket.io-client |
-| Server   | Node.js + Express + Socket.IO + TypeScript |
-| State    | Authoritative in-memory room manager on the server (positions, playback, chat) |
-| Video    | Blender Foundation open-license films (Big Buck Bunny, Sintel, …), streamed directly by clients from Google's public sample bucket |
-| Tests    | `node:test` unit tests + a live two-client socket smoke test |
+Grab a room code, walk into the theatre, claim a red seat, punch your buddy in the head,
+kill the lights, and watch. No accounts, no installs — it's a website.
 
-No database or external API keys are required for the MVP — rooms live in server memory
-and the movie catalog is a built-in list of openly licensed sample videos, plus a
-**YouTube option** — paste any YouTube link (VOD or live) in movie settings and it plays on
-the cinema screen for everyone, synced.
+<p align="center">
+  <img src="docs/screenshots/exterior.jpg" alt="Two blocky players outside the theatre" width="820">
+  <br><sub>You and Alex, outside the theatre. Room code's in the corner — send it to a friend.</sub>
+</p>
+
+## The pitch
+
+- 🎬 **A real movie night** — a giant voxel screen inside a proper dark theatre, red stadium
+  seats, curtains, and a light lever that actually kills the lights for everyone.
+- ⛓️ **One timeline for everybody** — play, pause, seek: the host drives, everyone else is
+  glued to the same frame. Late joiners get warped to the current timestamp.
+- 🌐 **Play almost anything** — paste a YouTube link, Vimeo, a raw MP4, HLS/DASH, or just a
+  video page and the server resolves it with `yt-dlp`. Built-in catalog of open-license
+  Blender films included, zero setup. (DRM streams are refused with a friendly shrug.)
+- 🧍 **Your Minecraft skin** — type your username, your real skin loads from Mojang's API.
+  Or upload any 64×64 PNG. Steve is the fallback for the nameless.
+- 💬 **It's a multiplayer server too** — chat, `/sit`, `/wave`, punch to sync an emote to
+  everyone, Tab for the player list, public rooms you can just browse into.
+
+<p align="center">
+  <img src="docs/screenshots/movie-lights-on.jpg" alt="Inside the theatre with the movie playing" width="820">
+  <br><sub>Lights on, film rolling.</sub>
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/movie-lights-off.jpg" alt="Inside the theatre with lights off" width="820">
+  <br><sub>Lights off. Now it's a cinema.</sub>
+</p>
+
+## Controls
+
+| Input | Action |
+|-------|--------|
+| **WASD** + mouse | Move / look (double-tap **W** to run) |
+| **Shift** / **Space** | Crouch / jump |
+| **E** (aim at a chair) | Sit down — **E** again to stand |
+| **E** (anywhere else) | Movie settings — paste links, play/pause, seek |
+| **E** (at the light lever) or **L** | Theatre lights on/off |
+| **Right click** | Punch (everyone sees it) |
+| **F5** | First-person ↔ third-person |
+| **F** | Full-screen video mode (the movie takes over the window) |
+| **T** / **/** · **Tab** · **Escape** | Chat · player list · release mouse |
+| **/sit** / **/wave** / **/help** | Chat commands |
 
 ## Quick start
 
 ```bash
-# from the repo root
-npm install          # installs root + server + client workspaces
-
-# terminal 1 — game server (http://localhost:4000)
-npm run dev -w server
-
-# terminal 2 — web client (http://localhost:5173)
-npm run dev -w client
-```
-
-Or run both together from the root:
-
-```bash
 npm install
-npm run dev
+npm run dev          # server :4000 + client :5173
 ```
 
-> Requires `yt-dlp` on PATH (used by the server to resolve the ambient screen's test video).
+Open **http://localhost:5173** in two windows, create a room in one, join with the code in
+the other. That's genuinely all it takes.
 
-Then open **http://localhost:5173** in two browser windows (or two different machines
-on your network) to see real multiplayer sync.
+> `yt-dlp` on PATH is only needed for pasted links (YouTube/Vimeo/pages). The built-in
+> catalog works without it.
 
-## How to use
-
-1. Enter your **Minecraft username** and hit **Fetch Skin** — your real skin is pulled from
-   Mojang's public API and applied to your character (Steve fallback if the name isn't found).
-   Or upload a custom 64×64 skin PNG.
-2. **Create a room** (public or private) — you get a 6-character room code and an invite link.
-3. Friends join via the code, the public-room list, or the copied link.
-4. Controls:
-   - **WASD** move · **double-tap W** run · **Shift** crouch (sneak) · **Space** jump · **mouse** look
-   - **E** — look at a chair to **sit**, anywhere else it opens **movie settings** (paste a **YouTube link**, duration bar, play/pause, seek, captions, volume, switch movie)
-   - **Right click** punch (syncs to other players) · **F5** toggle first/third person
-   - **T** (or **/**) open chat · **hold Tab** player list · **Escape** release mouse / close panels
-   - **/sit** sit on the nearest seat (or stand back up) — stadium rows: back rows are raised
-5. Walk into the cinema (north end of the map); aim at a seat and press **E** to sit (stadium
-   rows: back rows are raised), or press **E** anywhere else to open **movie settings**.
-6. When no movie is selected, the cinema screen always loops a **test YouTube live stream**
-   (muted, local ambient) — resolved with `yt-dlp` and served same-origin as HLS through the
-   server (`/api/youtube/stream` + `/api/youtube/seg`), played via `hls.js`.
-7. The **host** (room creator) selects a movie and controls play/pause/seek; everyone stays in sync.
-8. Late joiners automatically receive the current playback position and catch up.
-
-### Chat
-
-Chat is Minecraft-style: press **T** to open, messages overlay at the bottom-left and fade
-after a few seconds when closed, and a toggle button hides/shows chat entirely.
-
-| Command | Effect |
-|---------|--------|
-| `/help` | Show available commands |
-| `/sit`  | Sit / stand |
-| `/wave` | Wave emote |
-
-### Perspective
-
-First-person is the default (with a crosshair and a swinging hand). Press **F5** to swap to
-the third-person orbit camera.
-
-## Multiplayer architecture
-
-- The server is **authoritative**: it owns room membership, the host role, player positions
-  (clamped to world bounds), chat, and the canonical playback state.
-- Clients send movement at 10 Hz (server rate-limits to 30/s) and other clients **interpolate**
-  remote players smoothly between updates.
-- Playback state carries a server timestamp; clients estimate the expected position and
-  **drift-correct** only when they're more than 1.5 s off (no per-frame seeking).
-- Host disconnect → playback pauses and the host role transfers to the earliest-joined player.
-- Empty rooms are garbage-collected automatically.
-
-## Events (Socket.IO)
-
-Client → Server: `room:create` `room:join` `room:leave` `player:move` `player:speaking`
-`player:emote` `chat:send` `movie:select` `movie:play` `movie:pause` `movie:seek` `rooms:list`
-
-Server → Client: `room:joined` `room:state` `player:join` `player:leave` `player:moved`
-`player:speaking` `player:emote` `chat:message` `movie:state` `rooms:updated`
-`videos:catalog` `error:msg`
-
-## Testing
+### Run it for real
 
 ```bash
-# unit tests (room manager: join/leave, host transfer, playback auth, chat limits, …)
-npm test -w server
-
-# live multiplayer smoke test (starts real socket clients against a running server)
-npm run dev -w server &          # start server first
-npm exec -w server tsx test/live-smoke.ts
+npm run build        # client → client/dist, server → server/dist
+npm start            # NODE_ENV=production, serves everything on one origin (:4000)
 ```
 
-All **16 unit tests** and the **6 live socket assertions** pass (verified in this environment).
+Or ship it with Docker:
 
-## Environment variables
+```bash
+docker build -t screen-smp .
+docker run -p 4000:4000 screen-smp
+```
 
-Copy `.env.example`. Defaults work out of the box for local dev.
+One process, one port — the server serves the built client, so there's no CORS to
+configure. Point a host at it (there's a `render.yaml` for Render, and the image runs
+anywhere that takes a Dockerfile) and share the URL.
+
+### Environment
+
+Defaults work for local dev. `.env.example` has the full list.
 
 | Var | Default | Purpose |
 |-----|---------|---------|
 | `PORT` | `4000` | Game server port |
-| `CLIENT_ORIGIN` | `http://localhost:5173` | Allowed CORS origin |
-| `VITE_SOCKET_URL` | (dev proxy) | Production socket URL for the client |
+| `CLIENT_ORIGIN` | `http://localhost:5173` | Allowed browser origins (comma-separated in prod; leave unset to reflect everything) |
+| `VITE_SOCKET_URL` | `/` (same origin) | Socket URL baked into the client build (only needed if client & server are on different origins) |
 
-## Not yet included (honest MVP limits)
+## Tech
 
-- **Voice chat** — mic-level speaking indicators are wired (WebAudio analyser tints the
-  name tag green while you speak), but actual WebRTC voice transport (LiveKit/P2P) is a
-  planned next step and is **not** implemented here.
-- **Accounts / database** — rooms are ephemeral and in-memory; guest-only, no login.
-- **TMDB discovery** — the catalog uses built-in open-license sample films instead, so no
-  API key is needed. A TMDB integration would keep keys server-side and clearly separate
-  metadata from playable sources.
-- **Mobile touch controls** — basic touch-look is in the engine; a virtual joystick UI is pending.
+| Layer | Stack |
+|-------|-------|
+| Client | Vite · React 18 · TypeScript · Three.js · socket.io-client |
+| Server | Node · Express · Socket.IO · TypeScript |
+| Video | `yt-dlp` resolver → `/api/stream` same-origin proxy (range requests, segment cache, HLS/DASH), `hls.js`/`dashless` in the player, single-`<video>` pipeline |
+| State | Authoritative in-memory rooms on the server — positions at 10 Hz, interpolated remotes, timestamped playback with drift correction |
+| Tests | `node:test` — **30/30 passing** (`npm test`) |
 
-## Minecraft skin integration
+### How sync works (the short version)
 
-- `GET /api/skin/:username` on the game server proxies Mojang's public APIs
-  (`api.mojang.com` → `sessionserver.mojang.com`) and returns the skin texture URL + arm
-  model (classic/slim). Responses are cached in-memory for 10 minutes.
-- Usernames are validated (`[A-Za-z0-9_]{3,16}`) and requests are timeout-guarded.
-- Clients UV-map the 64×64 skin onto head/body/arms/legs box geometries with `NearestFilter`.
-  Legacy 64×32 skins are upsampled; a procedural Steve is the fallback.
-- Custom uploaded skins are sent as a size-capped base64 PNG data-URL (only
-  `textures.minecraft.net` URLs and small PNG data-URLs are accepted server-side).
-- No Minecraft assets, textures, or branding are bundled — skins are fetched at runtime
-  from the user's own Mojang account data.
+The server owns the room: membership, host role, positions (clamped to the world),
+chat, and the canonical playback state with a timestamp. Clients send movement at 10 Hz
+and interpolate everyone else. Playback carries a server time; each client estimates
+where the video *should* be and only corrects when it drifts past 1.5 s — so no
+annoying per-frame seeking. Host disconnects, the host role passes to whoever joined
+first. Empty rooms get garbage-collected.
+
+## What's not here (yet)
+
+- **Voice chat** — mic levels tint your name tag green (speaking indicator), but actual
+  WebRTC voice is a next step, not an MVP step.
+- **Accounts / database** — rooms are in-memory and ephemeral. Guest life only.
+- **Mobile controls** — touch-look exists in the engine; a virtual joystick doesn't.
 
 ## License notes
 
-Sample videos are Blender Foundation open movies (CC-BY), served from Google's public
-`gtv-videos-bucket`. Character/voxel art is generated procedurally — no Minecraft assets
-or branding are used.
+Sample films are Blender Foundation open movies (CC-BY). All voxel/character art is
+generated procedurally at runtime — no Minecraft assets, textures, or branding are
+bundled, and skins come from your own Mojang account data.
