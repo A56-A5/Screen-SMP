@@ -78,13 +78,29 @@ const YT_UA =
   "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36";
 const ytUrlCache = new Map<string, { url: string; expires: number }>();
 const YT_URL_TTL = 30 * 60 * 1000;
+// Two clients, tried in order via the handler's retry loop:
+//  - web_embedded: progressive MP4 (itag 18: video+audio in one file), the
+//    proven path for normal videos — no PO token needed.
+//  - android: fallback for videos with embedding DISABLED — their embedded
+//    URLs are issued fine but every fetch 403s (sefc enforcement). The
+//    android client serves the same progressive MP4 unrestricted.
+type YTClient = "web_embedded" | "android";
 
-async function resolveYouTube(videoId: string): Promise<string> {
+async function resolveYouTube(videoId: string, client: YTClient): Promise<string> {
   const cached = ytUrlCache.get(videoId);
   if (cached && cached.expires > Date.now()) return cached.url;
   const { stdout } = await execFileP(
     "yt-dlp",
-    ["-g", "-f", "b", "--no-playlist", "--", `https://www.youtube.com/watch?v=${videoId}`],
+    [
+      "--extractor-args",
+      `youtube:player_client=${client}`,
+      "-g",
+      "-f",
+      "b",
+      "--no-playlist",
+      "--",
+      `https://www.youtube.com/watch?v=${videoId}`,
+    ],
     { timeout: 30_000, maxBuffer: 1 << 20 }
   );
   const url = stdout.trim().split("\n")[0];
@@ -137,8 +153,12 @@ app.get("/api/youtube/stream", async (req, res) => {
     return res.status(400).json({ error: "Invalid videoId." });
   }
   for (let attempt = 0; attempt < 2; attempt++) {
+    // Attempt 0 = embedded (fast path); attempt 1 = android. Every failure
+    // mode below (yt-dlp error, 401/403 sniff, upstream reset) falls through
+    // to the next attempt, so embed-restricted videos land on android.
+    const client: YTClient = attempt === 0 ? "web_embedded" : "android";
     try {
-      const url = await resolveYouTube(videoId);
+      const url = await resolveYouTube(videoId, client);
       // Sniff with a tiny ranged GET (read first chunk only, then cancel) —
       // never buffer whole media files: they stream through instead.
       const sniff = await fetch(url, {

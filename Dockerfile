@@ -8,12 +8,16 @@ RUN npm ci
 COPY . .
 RUN npm run build
 
-# Runtime: node + yt-dlp only (no ffmpeg — streams are proxied, not remuxed).
+# Runtime: node + yt-dlp + Deno (yt-dlp's default JS runtime for YouTube's
+# challenge scripts) + bundled EJS components (no runtime fetches needed).
 FROM node:24-bookworm-slim
 RUN apt-get update \
- && apt-get install -y --no-install-recommends python3 python3-pip ca-certificates \
+ && apt-get install -y --no-install-recommends python3 python3-pip ca-certificates curl unzip \
  && rm -rf /var/lib/apt/lists/* \
- && pip3 install --no-cache-dir --break-system-packages -U yt-dlp
+ && curl -fsSL https://deno.land/install.sh | DENO_INSTALL=/usr/local sh -s -- -y \
+ && pip3 install --no-cache-dir --break-system-packages -U yt-dlp yt-dlp-ejs \
+ && deno --version \
+ && yt-dlp --version
 WORKDIR /app
 ENV NODE_ENV=production PORT=4000
 COPY package.json package-lock.json ./

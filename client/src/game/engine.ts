@@ -200,8 +200,13 @@ export class Game {
   private onMouseDown = (e: MouseEvent) => {
     if (e.button === 0) {
       // Left click just grabs the pointer (Minecraft-style). No interact.
+      // Chrome returns a promise that rejects if the lock is refused (e.g.
+      // right after Esc — there's a browser cooldown) — swallow it.
       if (!this.pointerLocked) {
-        this.renderer.domElement.requestPointerLock();
+        const p = this.renderer.domElement.requestPointerLock() as unknown;
+        if (p && typeof (p as Promise<void>).then === "function") {
+          (p as Promise<void>).catch(() => {});
+        }
       }
     } else if (e.button === 2 && this.pointerLocked) {
       // Right click: punch.

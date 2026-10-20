@@ -535,7 +535,20 @@ async function resolveYtdlp(pageUrl: string, depth = 0): Promise<Resolved> {
   try {
     const r = await execFileP(
       "yt-dlp",
-      ["--no-playlist", "--no-warnings", "-f", "b", "--get-title", "--get-url", "--", pageUrl],
+      [
+        // youtube: prefix is ignored by every other extractor; for YouTube
+        // it forces the progressive-mp4 client (see resolveYouTube in index.ts).
+        "--extractor-args",
+        "youtube:player_client=web_embedded",
+        "--no-playlist",
+        "--no-warnings",
+        "-f",
+        "b",
+        "--get-title",
+        "--get-url",
+        "--",
+        pageUrl,
+      ],
       { timeout: 45_000, maxBuffer: 4 << 20 }
     );
     stdout = r.stdout;
